@@ -1,0 +1,34 @@
+TPMS v1.10.0 Modular + ALS Multi-CLC - Validation Report
+=========================================================
+
+Static validation completed after integrating the two branches:
+
+PASS  PHP syntax parse: 153 PHP files
+PASS  ALS branch preservation: 51 mapped page/action files
+PASS  Static include/require target check
+PASS  Database contract check: 11 tables and 72 required columns
+PASS  Public action route check: 29 referenced endpoints, 30 wrappers
+PASS  Module action bootstrap check: 30 handlers
+PASS  Numbered migrations contain no hard-coded database selector
+PASS  Internal-folder access rule check
+PASS  PHP UTF-8 BOM check
+PASS  Embedded production credential scan
+PASS  Live personnel photo exclusion check
+
+Integrated coverage
+-------------------
+The build preserves the v1.10.0 modular configuration, compatibility routes,
+chat, and activity history while adding the school-program workflow and ALS
+teacher-to-many-CLC assignment behavior to Teachers, teacher profiles, ALS
+Centers, Schools, Reports, Retirement Watch, exports, and Requirement
+Planning.
+
+Runtime scope note
+------------------
+The validation environment did not provide native PHP, Apache, or MySQL.
+Syntax was checked with an independent PHP parser, and structure/schema
+contracts were checked statically. Authenticated browser flows, SQL migration
+execution, and database-backed behavior must still be smoke tested against a
+current database backup on staging before production deployment. Use
+BROWSER_TEST_CHECKLIST.txt, ALS_MULTI_CLC_TEST_CHECKLIST.txt, and
+INTEGRATION_NOTES.md first.

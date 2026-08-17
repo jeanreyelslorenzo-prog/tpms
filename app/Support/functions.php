@@ -1,0 +1,1871 @@
+<?php
+// ============================================================
+// Helper / Utility Functions
+// Developed By Daniel D. Milar/Lein-Tech.dev
+// ============================================================
+
+function clean(mixed $val): string {
+    return htmlspecialchars(trim((string)$val), ENT_QUOTES, 'UTF-8');
+}
+
+/** Return the configured salary grade for a controlled teacher designation. */
+function teacherSalaryGradeForPosition(?string $position): ?string {
+    $position = trim((string)$position);
+    return TEACHER_POSITION_SALARY_GRADES[$position] ?? null;
+}
+
+/** Ensure the non-destructive archive registry is available. */
+function ensureArchiveSchema(PDO $db): void {
+    static $ready = false;
+    if ($ready) return;
+    $db->exec(
+        'CREATE TABLE IF NOT EXISTS archived_records (
+            id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            entity_type VARCHAR(32) NOT NULL,
+            entity_id INT UNSIGNED NOT NULL,
+            archive_reason VARCHAR(255) DEFAULT NULL,
+            archived_by INT UNSIGNED DEFAULT NULL,
+            archived_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            restored_by INT UNSIGNED DEFAULT NULL,
+            restored_at TIMESTAMP NULL DEFAULT NULL,
+            UNIQUE KEY uk_archived_entity (entity_type, entity_id),
+            INDEX idx_archived_active (restored_at, entity_type, archived_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
+    );
+    $ready = true;
+}
+
+function archiveRecord(PDO $db, string $entityType, int $entityId, string $reason = ''): void {
+    ensureArchiveSchema($db);
+    $allowed = ['teacher', 'school', 'district', 'user'];
+    if (!in_array($entityType, $allowed, true) || $entityId <= 0) {
+        throw new InvalidArgumentException('Invalid archive target.');
+    }
+    $stmt = $db->prepare(
+        'INSERT INTO archived_records (entity_type, entity_id, archive_reason, archived_by)
+         VALUES (?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE archive_reason=VALUES(archive_reason), archived_by=VALUES(archived_by),
+             archived_at=NOW(), restored_by=NULL, restored_at=NULL'
+    );
+    $stmt->execute([$entityType, $entityId, $reason !== '' ? $reason : null, (int)(currentUser()['id'] ?? 0) ?: null]);
+}
+
+/** SQL predicate for excluding active archive entries from an entity query. */
+function activeArchiveExclusion(string $entityType, string $idExpression): string {
+    $allowed = ['teacher', 'school', 'district', 'user'];
+    if (!in_array($entityType, $allowed, true)) throw new InvalidArgumentException('Invalid archive entity type.');
+    return "NOT EXISTS (SELECT 1 FROM archived_records ar_active WHERE ar_active.entity_type = '"
+        . $entityType . "' AND ar_active.entity_id = " . $idExpression . ' AND ar_active.restored_at IS NULL)';
+}
+
+/** Validate bounded teacher form values shared by create and update actions. */
+function validateTeacherInputFields(array $data): array {
+    $errors = [];
+    $limits = [
+        'school_id_code_raw' => 8, 'employee_number' => 7,
+        'last_name' => 60, 'first_name' => 60, 'middle_name' => 60, 'extension_name' => 20,
+        'house_street' => 255, 'barangay' => 100, 'municipality' => 100, 'province' => 100,
+        'contact_number' => 11, 'email_address' => 150, 'position' => 100, 'item_number' => 20,
+        'salary_grade' => 20, 'appointment_type' => 50, 'school_name_raw' => 255,
+        'plantilla_station' => 255, 'district_raw' => 100,
+        'grade_level' => 255, 'specialization' => 150, 'subjects' => 500,
+        'highest_education' => 100, 'field_of_study' => 150, 'csee_eligibility' => 150,
+    ];
+    foreach ($limits as $field => $limit) {
+        if (mb_strlen((string)($data[$field] ?? '')) > $limit) {
+            $errors[$field] = 'Maximum length is ' . $limit . ' characters.';
+        }
+    }
+    foreach (['first_name', 'middle_name', 'last_name'] as $field) {
+        $value = (string)($data[$field] ?? '');
+        if ($value !== '' && !preg_match("/^[\p{L}\p{M} .'-]+$/u", $value)) {
+            $errors[$field] = 'Use letters, spaces, apostrophes, periods, or hyphens only.';
+        }
+    }
+    $extension = (string)($data['extension_name'] ?? '');
+    if ($extension !== '' && !preg_match('/^[A-Za-z0-9. -]{1,20}$/', $extension)) {
+        $errors['extension_name'] = 'Use letters, numbers, spaces, periods, or hyphens only.';
+    }
+    $contact = (string)($data['contact_number'] ?? '');
+    if ($contact !== '' && !preg_match('/^09\d{9}$/', $contact)) {
+        $errors['contact_number'] = 'Enter an 11-digit Philippine mobile number beginning with 09.';
+    }
+    $item = (string)($data['item_number'] ?? '');
+    if ($item !== '' && !preg_match('/^[A-Za-z0-9-]{1,20}$/', $item)) {
+        $errors['item_number'] = 'Use letters, numbers, and hyphens only, up to 20 characters.';
+    }
+    $employee = (string)($data['employee_number'] ?? '');
+    if ($employee !== '' && !preg_match('/^\d{7}$/', $employee)) {
+        $errors['employee_number'] = 'Employee number must contain exactly 7 digits.';
+    }
+    $schoolCode = (string)($data['school_id_code_raw'] ?? '');
+    if ($schoolCode !== '' && !preg_match('/^(?:\d{6}|\d{8})$/', $schoolCode)) {
+        $errors['school_id_code_raw'] = 'Use a 6-digit Formal School ID or an 8-digit ALS School ID.';
+    }
+    $email = (string)($data['email_address'] ?? '');
+    if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        $errors['email_address'] = 'Enter a valid email address.';
+    }
+    $specialization = (string)($data['specialization'] ?? '');
+    if ($specialization !== '' && !in_array($specialization, TEACHER_SPECIALIZATIONS, true)) {
+        $errors['specialization'] = 'Select a specialization from the list.';
+    }
+    $allowedValues = [
+        'gender' => ['Male', 'Female'],
+        'civil_status' => ['Single', 'Married', 'Widowed', 'Separated', 'Annulled'],
+        'pwd_status' => ['Yes', 'No'],
+        'appointment_type' => ['Permanent', 'Provisional', 'Substitute', 'Casual', 'Contractual', 'Co-terminus'],
+        'highest_education' => ["Bachelor's Degree", 'With Masteral Units', "Master's Degree", 'With Doctoral Units', 'Doctorate Degree'],
+    ];
+    foreach ($allowedValues as $field => $allowed) {
+        $value = (string)($data[$field] ?? '');
+        if ($value !== '' && !in_array($value, $allowed, true)) {
+            $errors[$field] = 'Select a valid option.';
+        }
+    }
+    $gradeLevel = (string)($data['grade_level'] ?? '');
+    if ($gradeLevel !== '') {
+        $allowedGrades = ['Kindergarten','Grade 1','Grade 2','Grade 3','Grade 4','Grade 5','Grade 6','Grade 7','Grade 8','Grade 9','Grade 10','Grade 11','Grade 12','ELEM','JHS','SHS'];
+        foreach (array_filter(array_map('trim', explode(',', $gradeLevel))) as $grade) {
+            if (!in_array($grade, $allowedGrades, true)) {
+                $errors['grade_level'] = 'Select grade levels from the available choices.';
+                break;
+            }
+        }
+    }
+    foreach (['birthdate', 'original_appointment_date'] as $field) {
+        $value = (string)($data[$field] ?? '');
+        if ($value === '') continue;
+        $parsed = DateTimeImmutable::createFromFormat('!Y-m-d', $value);
+        if (!$parsed || $parsed->format('Y-m-d') !== $value || $value > date('Y-m-d')) {
+            $errors[$field] = 'Enter a valid date that is not in the future.';
+        }
+    }
+    return $errors;
+}
+
+/**
+ * Validate and normalize curricular offering codes for one program.
+ *
+ * @param array<int|string,mixed> $offerings
+ * @return array<int,string>
+ */
+function normalizeSchoolOfferings(array $offerings, string $program): array {
+    $allowed = $program === 'als'
+        ? array_keys(ALS_CURRICULAR_OFFERINGS)
+        : ($program === 'formal' ? array_keys(FORMAL_CURRICULAR_OFFERINGS) : []);
+
+    $normalized = [];
+    foreach ($offerings as $offering) {
+        if (!is_scalar($offering)) continue;
+        $code = strtoupper(trim((string)$offering));
+        if (in_array($code, $allowed, true) && !in_array($code, $normalized, true)) {
+            $normalized[] = $code;
+        }
+    }
+    return $normalized;
+}
+
+/** Return the legacy schools.school_type value used by existing reports. */
+function legacySchoolTypeFromOfferings(array $offerings): string {
+    $set = array_fill_keys($offerings, true);
+    $hasElementary = isset($set['ELEMENTARY']);
+    $hasJhs = isset($set['JHS']);
+    $hasShs = isset($set['SHS']);
+
+    if ($hasElementary && $hasJhs && $hasShs) return 'ALL OFFERING';
+    if ($hasElementary && $hasJhs) return 'ES/JHS';
+    if ($hasElementary && $hasShs) return 'ES/SHS';
+    if ($hasJhs && $hasShs) return 'JHS/SHS';
+    if ($hasElementary) return 'Elementary';
+    if ($hasJhs) return 'JHS';
+    if ($hasShs) return 'SHS';
+    if (isset($set['KINDER'])) return 'Kindergarten';
+
+    foreach (array_keys(ALS_CURRICULAR_OFFERINGS) as $alsCode) {
+        if (isset($set[$alsCode])) return 'ALS';
+    }
+    return '';
+}
+
+/**
+ * Derive the program flags, compatibility category, and user-facing school
+ * classification from authoritative offering codes.
+ *
+ * @param array<int,string> $offerings
+ * @return array{has_formal:bool,has_als:bool,category:string,classification:string}
+ */
+function schoolProgramProfile(array $offerings): array {
+    $set = array_fill_keys($offerings, true);
+    $hasFormal = false;
+    $hasAls = false;
+
+    foreach (array_keys(FORMAL_CURRICULAR_OFFERINGS) as $code) {
+        if (isset($set[$code])) {
+            $hasFormal = true;
+            break;
+        }
+    }
+    foreach (array_keys(ALS_CURRICULAR_OFFERINGS) as $code) {
+        if (isset($set[$code])) {
+            $hasAls = true;
+            break;
+        }
+    }
+
+    if (!$hasFormal) {
+        return [
+            'has_formal' => false,
+            'has_als' => $hasAls,
+            'category' => $hasAls ? 'als' : '',
+            'classification' => $hasAls ? 'ALS-only' : 'Unclassified',
+        ];
+    }
+
+    $hasKinder = isset($set['KINDER']);
+    $hasElementary = isset($set['ELEMENTARY']);
+    $hasJhs = isset($set['JHS']);
+    $hasShs = isset($set['SHS']);
+
+    if ($hasElementary && $hasJhs && $hasShs) {
+        $classification = 'Integrated K–12';
+    } elseif ($hasElementary && $hasJhs) {
+        $classification = 'Integrated K–10';
+    } elseif ($hasJhs && $hasShs) {
+        $classification = 'Secondary';
+    } elseif ($hasElementary) {
+        $classification = 'Elementary';
+    } elseif ($hasJhs) {
+        $classification = 'JHS';
+    } elseif ($hasShs) {
+        $classification = 'SHS';
+    } elseif ($hasKinder) {
+        $classification = 'Kindergarten-only';
+    } else {
+        $classification = 'Formal Education';
+    }
+
+    if ($hasAls) $classification .= ' with ALS';
+
+    return [
+        'has_formal' => true,
+        'has_als' => $hasAls,
+        'category' => $hasAls ? 'formal_with_als' : 'formal',
+        'classification' => $classification,
+    ];
+}
+
+/**
+ * Build the enrollment/class rows required by the chosen offerings.
+ *
+ * @param array<int,string> $offerings
+ * @return array<string,string> level code => display label
+ */
+function schoolLevelRows(array $offerings): array {
+    $set = array_fill_keys($offerings, true);
+    $rows = [];
+
+    if (isset($set['KINDER'])) $rows['KINDER'] = 'Kindergarten';
+    if (isset($set['ELEMENTARY'])) {
+        for ($grade = 1; $grade <= 6; $grade++) $rows['GRADE_' . $grade] = 'Grade ' . $grade;
+    }
+    if (isset($set['JHS'])) {
+        for ($grade = 7; $grade <= 10; $grade++) $rows['GRADE_' . $grade] = 'Grade ' . $grade;
+    }
+    if (isset($set['SHS'])) {
+        for ($grade = 11; $grade <= 12; $grade++) $rows['GRADE_' . $grade] = 'Grade ' . $grade;
+    }
+
+    foreach (ALS_CURRICULAR_OFFERINGS as $code => $label) {
+        if (isset($set[$code])) {
+            if ($code === 'ALS-SHS') {
+                $rows['ALS_GRADE_11'] = 'ALS SHS – Grade 11';
+                $rows['ALS_GRADE_12'] = 'ALS SHS – Grade 12';
+            } else {
+                $rows['ALS_' . str_replace('-', '_', $code)] = $label;
+            }
+        }
+    }
+    return $rows;
+}
+
+/** Return the DepEd school year that contains the supplied date. */
+function defaultSchoolYear(?DateTimeInterface $date = null): string {
+    $date ??= new DateTimeImmutable('now');
+    $calendarYear = (int)$date->format('Y');
+    $startYear = (int)$date->format('n') >= 6 ? $calendarYear : $calendarYear - 1;
+    return $startYear . '-' . ($startYear + 1);
+}
+
+/** Normalize a school year to YYYY-YYYY and reject non-consecutive years. */
+function normalizeSchoolYear(string $value): string {
+    $value = preg_replace('/\s+/u', '', trim($value));
+    $value = str_replace(['–', '—', '/'], '-', (string)$value);
+    if (!preg_match('/^(\d{4})-(\d{4})$/', $value, $matches)) {
+        return '';
+    }
+
+    $start = (int)$matches[1];
+    $end = (int)$matches[2];
+    if ($start < 1900 || $end !== $start + 1) {
+        return '';
+    }
+    return $start . '-' . $end;
+}
+
+/** @return array<int,int> */
+function normalizePositiveIdList(mixed $value): array {
+    $values = is_array($value) ? $value : [];
+    $ids = [];
+    foreach ($values as $item) {
+        if (!is_scalar($item)) continue;
+        $id = (int)$item;
+        if ($id > 0) $ids[$id] = $id;
+    }
+    return array_values($ids);
+}
+
+/** Return schools and learning centers that currently offer an ALS program. */
+function fetchAlsCenters(PDO $db, ?int $districtId = null): array {
+    ensureArchiveSchema($db);
+    requireDatabaseStructure($db, [
+        'schools' => ['id', 'school_name', 'school_id_code', 'offers_als', 'district_id', 'institution_classification'],
+        'school_curricular_offerings' => ['school_id', 'offering_code'],
+    ]);
+
+    $sql = "SELECT s.id, s.school_name, s.school_id_code, s.institution_classification,
+                   d.district_name AS district,
+                   (SELECT GROUP_CONCAT(sco.offering_code ORDER BY sco.offering_code SEPARATOR ', ')
+                    FROM school_curricular_offerings sco
+                    WHERE sco.school_id = s.id
+                      AND sco.offering_code IN ('CBCLC','CBLC','SBLC','ALS-SHS')) AS als_offerings
+            FROM schools s
+            LEFT JOIN districts d ON d.id = s.district_id
+            WHERE s.offers_als = 1 AND " . activeArchiveExclusion('school', 's.id');
+    $params = [];
+    if ($districtId !== null && $districtId > 0) {
+        $sql .= ' AND s.district_id = ?';
+        $params[] = $districtId;
+    }
+    $sql .= ' ORDER BY d.district_name, s.school_name';
+
+    $stmt = $db->prepare($sql);
+    $stmt->execute($params);
+    return $stmt->fetchAll(PDO::FETCH_ASSOC);
+}
+
+/**
+ * Validate the ALS assignment fields submitted with a teacher form.
+ *
+ * @return array{ids:array<int,int>,school_year:string,primary_id:int,errors:array<string,string>}
+ */
+function validateTeacherClcSelection(
+    PDO $db,
+    mixed $rawIds,
+    string $rawSchoolYear,
+    mixed $rawPrimaryId,
+    ?int $districtId = null
+): array {
+    ensureArchiveSchema($db);
+    requireDatabaseStructure($db, [
+        'teacher_clc_assignments' => ['teacher_id', 'clc_school_id', 'school_year', 'is_primary', 'assignment_status', 'updated_at'],
+        'schools' => ['id', 'offers_als', 'district_id'],
+    ]);
+
+    $ids = normalizePositiveIdList($rawIds);
+    $primaryId = is_scalar($rawPrimaryId) ? (int)$rawPrimaryId : 0;
+    $schoolYear = normalizeSchoolYear($rawSchoolYear);
+    $errors = [];
+
+    if ($ids && $schoolYear === '') {
+        $errors['als_school_year'] = 'Enter a valid consecutive school year, for example 2026-2027.';
+    }
+    if ($primaryId > 0 && !in_array($primaryId, $ids, true)) {
+        $errors['primary_clc_id'] = 'The primary CLC must also be checked as an assigned CLC.';
+    }
+
+    if ($ids) {
+        $placeholders = implode(',', array_fill(0, count($ids), '?'));
+        $sql = "SELECT id FROM schools WHERE offers_als = 1 AND id IN ($placeholders) AND " . activeArchiveExclusion('school', 'schools.id');
+        $params = $ids;
+        if ($districtId !== null && $districtId > 0) {
+            $sql .= ' AND district_id = ?';
+            $params[] = $districtId;
+        }
+        $stmt = $db->prepare($sql);
+        $stmt->execute($params);
+        $validIds = array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+        if (array_diff($ids, $validIds)) {
+            $errors['als_clc_ids'] = 'One or more selected CLCs are invalid or outside your assigned district.';
+        }
+    }
+
+    return [
+        'ids' => $ids,
+        'school_year' => $schoolYear !== '' ? $schoolYear : defaultSchoolYear(),
+        'primary_id' => $primaryId > 0 ? $primaryId : 0,
+        'errors' => $errors,
+    ];
+}
+
+/** Update the authoritative continuous ALS assignment period when its CLC set changes. */
+function syncTeacherClcAssignments(
+    PDO $db,
+    int $teacherId,
+    array $clcIds,
+    string $schoolYear,
+    int $primaryClcId = 0
+): void {
+    requireDatabaseStructure($db, [
+        'teacher_clc_assignments' => ['teacher_id', 'clc_school_id', 'school_year', 'is_primary', 'assignment_status', 'updated_at'],
+        'als_teacher_assignments' => ['teacher_id', 'start_school_year', 'end_school_year', 'effective_start_date', 'effective_end_date', 'assignment_status', 'created_by'],
+        'als_teacher_assignment_clcs' => ['assignment_id', 'clc_school_id', 'is_primary'],
+    ]);
+    if ($teacherId <= 0 || normalizeSchoolYear($schoolYear) === '') {
+        throw new InvalidArgumentException('Invalid teacher or school year for ALS assignments.');
+    }
+
+    $clcIds = normalizePositiveIdList($clcIds);
+    sort($clcIds, SORT_NUMERIC);
+    if ($primaryClcId > 0 && !in_array($primaryClcId, $clcIds, true)) {
+        throw new InvalidArgumentException('Primary CLC must be part of the selected assignments.');
+    }
+
+    $activeStmt = $db->prepare(
+        "SELECT id, start_school_year FROM als_teacher_assignments
+         WHERE teacher_id = ? AND assignment_status = 'Active'
+         ORDER BY start_school_year DESC, id DESC LIMIT 1"
+    );
+    $activeStmt->execute([$teacherId]);
+    $activePeriod = $activeStmt->fetch(PDO::FETCH_ASSOC) ?: null;
+    $activeIds = [];
+    if ($activePeriod) {
+        $activeClcStmt = $db->prepare('SELECT clc_school_id FROM als_teacher_assignment_clcs WHERE assignment_id = ? ORDER BY clc_school_id');
+        $activeClcStmt->execute([(int)$activePeriod['id']]);
+        $activeIds = array_map('intval', $activeClcStmt->fetchAll(PDO::FETCH_COLUMN));
+    }
+
+    if ($activePeriod && $activeIds === $clcIds) {
+        $db->prepare('UPDATE als_teacher_assignment_clcs SET is_primary = (clc_school_id = ?) WHERE assignment_id = ?')
+            ->execute([$primaryClcId, (int)$activePeriod['id']]);
+    } else {
+        $returningWithinYear = false;
+        if (!$activePeriod && $clcIds) {
+            $overlapStmt = $db->prepare(
+                "SELECT id, effective_end_date FROM als_teacher_assignments
+                 WHERE teacher_id = ? AND assignment_status <> 'Cancelled'
+                   AND start_school_year <= ? AND (end_school_year IS NULL OR end_school_year >= ?)
+                 ORDER BY start_school_year DESC, id DESC LIMIT 1"
+            );
+            $overlapStmt->execute([$teacherId, $schoolYear, $schoolYear]);
+            $overlap = $overlapStmt->fetch(PDO::FETCH_ASSOC) ?: null;
+            if ($overlap && empty($overlap['effective_end_date'])) {
+                throw new InvalidArgumentException('This start school year overlaps an existing ALS assignment period. Use a later school year or provide an exact dated change.');
+            }
+            $returningWithinYear = $overlap !== null;
+        }
+        if ($activePeriod) {
+            if ((string)$activePeriod['start_school_year'] > $schoolYear) {
+                throw new InvalidArgumentException('The new ALS assignment period cannot begin before the current active period.');
+            }
+            $startYear = (int)substr($schoolYear, 0, 4);
+            $previousYear = ($startYear - 1) . '-' . $startYear;
+            $sameSchoolYear = (string)$activePeriod['start_school_year'] === $schoolYear;
+            $db->prepare(
+                "UPDATE als_teacher_assignments
+                 SET end_school_year = ?, effective_end_date = " . ($sameSchoolYear ? 'DATE_SUB(NOW(), INTERVAL 1 SECOND)' : 'NULL') . ", assignment_status = 'Ended', updated_at = NOW()
+                 WHERE id = ?"
+            )->execute([$sameSchoolYear ? $schoolYear : $previousYear, (int)$activePeriod['id']]);
+        }
+
+        if ($clcIds) {
+            $insertPeriod = $db->prepare(
+                "INSERT INTO als_teacher_assignments
+                    (teacher_id, start_school_year, effective_start_date, assignment_status, created_by)
+                 VALUES (?, ?, ?, 'Active', ?)"
+            );
+            $insertPeriod->execute([
+                $teacherId,
+                $schoolYear,
+                ($activePeriod && (string)$activePeriod['start_school_year'] === $schoolYear) || $returningWithinYear ? date('Y-m-d H:i:s') : null,
+                (int)(currentUser()['id'] ?? 0) ?: null,
+            ]);
+            $periodId = (int)$db->lastInsertId();
+            $insertClc = $db->prepare(
+                'INSERT INTO als_teacher_assignment_clcs (assignment_id, clc_school_id, is_primary) VALUES (?, ?, ?)'
+            );
+            foreach ($clcIds as $clcId) {
+                $insertClc->execute([$periodId, $clcId, $clcId === $primaryClcId ? 1 : 0]);
+            }
+        }
+    }
+
+    // Compatibility projection for legacy coverage/report queries. This is not
+    // the assignment history source and is never expanded annually.
+    $db->prepare(
+        "UPDATE teacher_clc_assignments
+         SET assignment_status = 'Inactive', is_primary = 0, updated_at = NOW()
+         WHERE teacher_id = ? AND assignment_status = 'Active'"
+    )->execute([$teacherId]);
+
+    if (!$clcIds) return;
+
+    $upsert = $db->prepare(
+        "INSERT INTO teacher_clc_assignments
+            (teacher_id, clc_school_id, school_year, is_primary, assignment_status)
+         VALUES (?, ?, ?, ?, 'Active')
+         ON DUPLICATE KEY UPDATE
+            is_primary = VALUES(is_primary),
+            assignment_status = 'Active',
+            updated_at = NOW()"
+    );
+    foreach ($clcIds as $clcId) {
+        $upsert->execute([$teacherId, $clcId, $schoolYear, $clcId === $primaryClcId ? 1 : 0]);
+    }
+}
+
+/** Fetch grouped continuous assignment periods, optionally overlapping one school year. */
+function fetchTeacherClcAssignments(PDO $db, int $teacherId, ?string $schoolYear = null): array {
+    requireDatabaseStructure($db, [
+        'als_teacher_assignments' => ['teacher_id', 'start_school_year', 'end_school_year', 'effective_start_date', 'effective_end_date', 'assignment_status'],
+        'als_teacher_assignment_clcs' => ['assignment_id', 'clc_school_id', 'is_primary'],
+    ]);
+
+    $sql = "SELECT a.*,
+                   GROUP_CONCAT(c.clc_school_id ORDER BY s.school_name SEPARATOR ',') AS clc_ids,
+                   GROUP_CONCAT(s.school_name ORDER BY s.school_name SEPARATOR '||') AS clc_names,
+                   GROUP_CONCAT(
+                       COALESCE(
+                           NULLIF(TRIM(s.als_subtype), ''),
+                           (SELECT GROUP_CONCAT(sco.offering_code ORDER BY sco.offering_code SEPARATOR ', ')
+                            FROM school_curricular_offerings sco
+                            WHERE sco.school_id = s.id
+                              AND sco.offering_code IN ('CBCLC','CBLC','SBLC','ALS-SHS')),
+                           'ALS'
+                       ) ORDER BY s.school_name SEPARATOR '||'
+                   ) AS clc_subtypes,
+                   GROUP_CONCAT(CASE WHEN c.is_primary = 1 THEN c.clc_school_id END ORDER BY s.school_name SEPARATOR ',') AS primary_clc_ids,
+                   GROUP_CONCAT(CASE WHEN c.is_primary = 1 THEN s.school_name END ORDER BY s.school_name SEPARATOR ', ') AS primary_clc_names
+            FROM als_teacher_assignments a
+            INNER JOIN als_teacher_assignment_clcs c ON c.assignment_id = a.id
+            INNER JOIN schools s ON s.id = c.clc_school_id
+            WHERE a.teacher_id = ?";
+    $params = [$teacherId];
+    if ($schoolYear !== null) {
+        $yearStart = (int)substr($schoolYear, 0, 4);
+        $schoolYearStartDate = sprintf('%04d-06-01 00:00:00', $yearStart);
+        $schoolYearEndDate = sprintf('%04d-05-31 23:59:59', $yearStart + 1);
+        $sql .= ' AND a.start_school_year <= ? AND (a.end_school_year IS NULL OR a.end_school_year >= ?)
+                  AND (a.effective_start_date IS NULL OR a.effective_start_date <= ?)
+                  AND (a.effective_end_date IS NULL OR a.effective_end_date >= ?)';
+        $params[] = $schoolYear;
+        $params[] = $schoolYear;
+        $params[] = $schoolYearEndDate;
+        $params[] = $schoolYearStartDate;
+    }
+    $sql .= " GROUP BY a.id ORDER BY a.start_school_year DESC, COALESCE(a.effective_start_date, '0000-00-00') DESC, a.id DESC";
+    $stmt = $db->prepare($sql);
+    $stmt->execute($params);
+    return $stmt->fetchAll(PDO::FETCH_ASSOC);
+}
+
+function flash(string $type, string $msg): void {
+    $_SESSION['flash'] = ['type' => $type, 'msg' => $msg];
+}
+
+function getFlash(): ?array {
+    if (!isset($_SESSION['flash'])) return null;
+    $f = $_SESSION['flash'];
+    unset($_SESSION['flash']);
+    return $f;
+}
+
+function redirect(string $url): void {
+    // Clean any buffered output to allow redirect headers
+    if (ob_get_length()) {
+        ob_end_clean();
+    }
+    
+    // Redirect with Location header if not yet sent
+    if (!headers_sent()) {
+        header('Location: ' . $url);
+    } else {
+        // Fallback: JS/meta redirect if headers already sent
+        $safeUrl = json_encode($url, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+        echo '<script>window.location.href=' . $safeUrl . ';</script>';
+        echo '<noscript><meta http-equiv="refresh" content="0;url=' . htmlspecialchars($url, ENT_QUOTES, 'UTF-8') . '"></noscript>';
+    }
+    exit();
+}
+
+/** Preserve form values and field errors across action-to-page redirects. */
+function putFormState(string $key, array $data, array $errors): void {
+    $_SESSION['form_state'][$key] = [
+        'data' => $data,
+        'errors' => $errors,
+        'created_at' => time(),
+    ];
+}
+
+function pullFormState(string $key): array {
+    $state = $_SESSION['form_state'][$key] ?? [];
+    unset($_SESSION['form_state'][$key]);
+
+    if (!is_array($state) || (int)($state['created_at'] ?? 0) < time() - 900) {
+        return ['data' => [], 'errors' => []];
+    }
+
+    return [
+        'data' => is_array($state['data'] ?? null) ? $state['data'] : [],
+        'errors' => is_array($state['errors'] ?? null) ? $state['errors'] : [],
+    ];
+}
+
+/**
+ * Encrypt an integer ID for use in URLs.
+ * Uses AES-128-ECB with a key derived from ENCRYPT_KEY.
+ */
+function encryptId(int $id): string {
+    $key = substr(hash('sha256', ENCRYPT_KEY, true), 0, 16);
+    $enc = openssl_encrypt(pack('N', $id), 'AES-128-ECB', $key, OPENSSL_RAW_DATA);
+    return rtrim(strtr(base64_encode($enc), '+/', '-_'), '=');
+}
+
+/**
+ * Decrypt an encrypted ID token back to an integer.
+ * Returns false on invalid/tampered input.
+ */
+function decryptId(string $token): int|false {
+    if ($token === '') return false;
+    try {
+        $key    = substr(hash('sha256', ENCRYPT_KEY, true), 0, 16);
+        $padLen = (4 - strlen($token) % 4) % 4;
+        $b64    = strtr($token, '-_', '+/') . str_repeat('=', $padLen);
+        $dec    = openssl_decrypt(base64_decode($b64), 'AES-128-ECB', $key, OPENSSL_RAW_DATA);
+        if ($dec === false || strlen($dec) < 4) return false;
+        $id = unpack('N', substr($dec, 0, 4))[1];
+        return $id > 0 ? $id : false;
+    } catch (Throwable) {
+        return false;
+    }
+}
+
+function base64UrlEncode(string $raw): string {
+    return rtrim(strtr(base64_encode($raw), '+/', '-_'), '=');
+}
+
+function base64UrlDecode(string $raw): string|false {
+    if ($raw === '') return false;
+    $pad = (4 - (strlen($raw) % 4)) % 4;
+    return base64_decode(strtr($raw . str_repeat('=', $pad), '-_', '+/'), true);
+}
+
+/**
+ * Encrypt an arbitrary payload for TPMS-only verification links.
+ * Uses AES-256-GCM and returns a URL-safe token.
+ */
+function encryptSecureToken(array $payload): string|false {
+    $json = json_encode($payload, JSON_UNESCAPED_SLASHES);
+    if ($json === false) return false;
+
+    $key = hash('sha256', ENCRYPT_KEY, true); // 32 bytes
+    $iv = random_bytes(12);
+    $tag = '';
+    $cipher = openssl_encrypt($json, 'aes-256-gcm', $key, OPENSSL_RAW_DATA, $iv, $tag, '', 16);
+    if ($cipher === false) return false;
+
+    return 'v1.' . base64UrlEncode($iv) . '.' . base64UrlEncode($tag) . '.' . base64UrlEncode($cipher);
+}
+
+/**
+ * Decrypt a TPMS secure token generated by encryptSecureToken.
+ * Returns associative array payload or false if invalid.
+ */
+function decryptSecureToken(string $token): array|false {
+    if ($token === '') return false;
+
+    $parts = explode('.', $token);
+    if (count($parts) !== 4 || $parts[0] !== 'v1') return false;
+
+    $iv = base64UrlDecode($parts[1]);
+    $tag = base64UrlDecode($parts[2]);
+    $cipher = base64UrlDecode($parts[3]);
+    if ($iv === false || $tag === false || $cipher === false) return false;
+    if (strlen($iv) !== 12 || strlen($tag) < 12) return false;
+
+    $key = hash('sha256', ENCRYPT_KEY, true);
+    $plain = openssl_decrypt($cipher, 'aes-256-gcm', $key, OPENSSL_RAW_DATA, $iv, $tag, '');
+    if ($plain === false) return false;
+
+    $decoded = json_decode($plain, true);
+    return is_array($decoded) ? $decoded : false;
+}
+
+function paginate(int $total, int $page, int $perPage = ITEMS_PER_PAGE): array {
+    $totalPages  = (int) ceil($total / $perPage);
+    $currentPage = max(1, min($page, $totalPages));
+    $offset      = ($currentPage - 1) * $perPage;
+    return [
+        'total'       => $total,
+        'per_page'    => $perPage,
+        'current'     => $currentPage,
+        'total_pages' => $totalPages,
+        'offset'      => $offset,
+    ];
+}
+
+function paginationLinks(array $p, string $baseUrl): string {
+    if ($p['total_pages'] <= 1) return '';
+    $html  = '<div class="pagination">';
+    $query = parse_url($baseUrl, PHP_URL_QUERY);
+    parse_str($query ?? '', $params);
+
+    if ($p['current'] > 1) {
+        $params['page'] = $p['current'] - 1;
+        $html .= '<a href="?' . http_build_query($params) . '" class="page-btn">&#8249;</a>';
+    }
+
+    $start = max(1, $p['current'] - 2);
+    $end   = min($p['total_pages'], $p['current'] + 2);
+    for ($i = $start; $i <= $end; $i++) {
+        $params['page'] = $i;
+        $active = $i === $p['current'] ? ' active' : '';
+        $html  .= '<a href="?' . http_build_query($params) . '" class="page-btn' . $active . '">' . $i . '</a>';
+    }
+
+    if ($p['current'] < $p['total_pages']) {
+        $params['page'] = $p['current'] + 1;
+        $html .= '<a href="?' . http_build_query($params) . '" class="page-btn">&#8250;</a>';
+    }
+    $html .= '<span class="page-info">Page ' . $p['current'] . ' of ' . $p['total_pages']
+           . ' &nbsp;|&nbsp; ' . number_format($p['total']) . ' records</span>';
+    $html .= '</div>';
+    return $html;
+}
+
+function uploadPhoto(array $file, ?string $oldPhoto = null): string|false {
+    if ($file['error'] !== UPLOAD_ERR_OK) return false;
+    if ($file['size'] > MAX_PHOTO_SIZE)   return false;
+
+    $finfo = new finfo(FILEINFO_MIME_TYPE);
+    $mime  = $finfo->file($file['tmp_name']);
+    if (!in_array($mime, ALLOWED_IMG_TYPES, true)) return false;
+
+    $ext  = match($mime) {
+        'image/jpeg' => 'jpg',
+        'image/png'  => 'png',
+        'image/webp' => 'webp',
+        default      => false
+    };
+    if (!$ext) return false;
+
+    if (!is_dir(UPLOAD_PATH)) {
+        mkdir(UPLOAD_PATH, 0755, true);
+    }
+
+    $filename = 'photo_' . uniqid() . '_' . time() . '.' . $ext;
+    $dest     = UPLOAD_PATH . $filename;
+
+    if (!move_uploaded_file($file['tmp_name'], $dest)) return false;
+
+    // Resize to 300×300 if GD available
+    if (extension_loaded('gd')) {
+        resizeImage($dest, 300, 300, $mime);
+    }
+
+    // Delete old photo
+    if ($oldPhoto && $oldPhoto !== 'default.png') {
+        $oldPath = UPLOAD_PATH . $oldPhoto;
+        if (is_file($oldPath)) unlink($oldPath);
+    }
+
+    return $filename;
+}
+
+function resizeImage(string $path, int $maxW, int $maxH, string $mime): void {
+    $src = match($mime) {
+        'image/jpeg' => imagecreatefromjpeg($path),
+        'image/png'  => imagecreatefrompng($path),
+        'image/webp' => imagecreatefromwebp($path),
+        default      => null
+    };
+    if (!$src) return;
+
+    [$w, $h] = [imagesx($src), imagesy($src)];
+    $ratio    = min($maxW / $w, $maxH / $h);
+    $nw       = (int)($w * $ratio);
+    $nh       = (int)($h * $ratio);
+    $dest     = imagecreatetruecolor($nw, $nh);
+    imagecopyresampled($dest, $src, 0, 0, 0, 0, $nw, $nh, $w, $h);
+
+    match($mime) {
+        'image/jpeg' => imagejpeg($dest, $path, 85),
+        'image/png'  => imagepng($dest, $path, 7),
+        'image/webp' => imagewebp($dest, $path, 85),
+        default      => null
+    };
+    imagedestroy($src);
+    imagedestroy($dest);
+}
+
+function logActivity(string $action, string $module, ?int $recordId = null, string $desc = ''): void {
+    try {
+        $db   = getDB();
+        $user = currentUser();
+        $db->prepare(
+            'INSERT INTO activity_logs (user_id, user_name, action, module, record_id, description, ip_address)
+             VALUES (?, ?, ?, ?, ?, ?, ?)'
+        )->execute([
+            $user['id'] ?: null,
+            $user['full_name'],
+            $action,
+            $module,
+            $recordId,
+            $desc,
+            $_SERVER['REMOTE_ADDR'] ?? 'unknown'
+        ]);
+    } catch (Exception) {}
+}
+
+function calcAge(?string $birthdate): ?int {
+    if (!$birthdate) return null;
+    try {
+        $dob  = new DateTime($birthdate);
+        $now  = new DateTime();
+        return (int)$dob->diff($now)->y;
+    } catch (Exception) {
+        return null;
+    }
+}
+
+function formatDate(?string $date): string {
+    if (!$date || $date === '0000-00-00') return '—';
+    try {
+        return (new DateTime($date))->format('M d, Y');
+    } catch (Exception) {
+        return $date;
+    }
+}
+
+function extractSchoolCodeToken(?string $raw): string {
+    $raw = trim((string)$raw);
+    if ($raw === '') return '';
+    if (ctype_digit($raw)) return $raw;
+    if (preg_match('/\((\d{4,})\)/', $raw, $m)) return $m[1];
+    if (preg_match('/\b(\d{4,})\b/', $raw, $m)) return $m[1];
+    return '';
+}
+
+/**
+ * Resolve a school row from teacher form/upload data.
+ * Matching priority: explicit school_id, school_id_code_raw, school_name_raw, plantilla/current station.
+ */
+function resolveSchoolFromTeacherData(PDO $db, array $data): ?array {
+    $baseSql = 'SELECT s.id, s.school_id_code, s.school_name, s.district_id, d.district_name
+                FROM schools s
+                LEFT JOIN districts d ON s.district_id = d.id';
+
+    $selectedId = (int)($data['school_id'] ?? 0);
+    if ($selectedId > 0) {
+        $st = $db->prepare($baseSql . ' WHERE s.id = ? LIMIT 1');
+        $st->execute([$selectedId]);
+        $row = $st->fetch();
+        if ($row) return $row;
+    }
+
+    $codeCandidates = [];
+    $rawCode = trim((string)($data['school_id_code_raw'] ?? ''));
+    $tokenCode = extractSchoolCodeToken($rawCode);
+    if ($tokenCode !== '') $codeCandidates[] = strtolower($tokenCode);
+    if ($rawCode !== '') $codeCandidates[] = strtolower($rawCode);
+    $codeCandidates = array_values(array_unique($codeCandidates));
+
+    if ($codeCandidates) {
+        $st = $db->prepare($baseSql . ' WHERE LOWER(TRIM(COALESCE(s.school_id_code, ""))) = ? LIMIT 1');
+        foreach ($codeCandidates as $cand) {
+            $st->execute([$cand]);
+            $row = $st->fetch();
+            if ($row) return $row;
+        }
+    }
+
+    $nameCandidates = [];
+    foreach (['school_name_raw', 'plantilla_station'] as $k) {
+        $v = trim((string)($data[$k] ?? ''));
+        if ($v !== '') $nameCandidates[] = $v;
+    }
+    $nameCandidates = array_values(array_unique($nameCandidates));
+
+    if ($nameCandidates) {
+        $exact = $db->prepare($baseSql . ' WHERE LOWER(TRIM(s.school_name)) = ? LIMIT 1');
+        foreach ($nameCandidates as $cand) {
+            $exact->execute([strtolower($cand)]);
+            $row = $exact->fetch();
+            if ($row) return $row;
+        }
+
+        $like = $db->prepare(
+            $baseSql . ' WHERE LOWER(s.school_name) LIKE ?
+                         ORDER BY CASE WHEN LOWER(TRIM(s.school_name)) = ? THEN 0 ELSE 1 END,
+                                  CHAR_LENGTH(s.school_name) ASC
+                         LIMIT 1'
+        );
+        foreach ($nameCandidates as $cand) {
+            $lc = strtolower($cand);
+            $like->execute(['%' . $lc . '%', $lc]);
+            $row = $like->fetch();
+            if ($row) return $row;
+        }
+    }
+
+    return null;
+}
+
+function toRomanNumeral(int $value): string {
+    $map = [
+        10 => 'X',
+        9 => 'IX',
+        5 => 'V',
+        4 => 'IV',
+        1 => 'I',
+    ];
+    $result = '';
+    foreach ($map as $num => $roman) {
+        while ($value >= $num) {
+            $result .= $roman;
+            $value -= $num;
+        }
+    }
+    return $result;
+}
+
+/**
+ * Derive a teacher position from known employment fields.
+ * Returns null when no reliable mapping can be inferred.
+ */
+function deriveTeacherPosition(?string $itemNumber, ?string $salaryGrade): ?string {
+    $itemRaw = strtoupper(trim((string)$itemNumber));
+    $item    = preg_replace('/[^A-Z0-9]/', '', $itemRaw);
+
+    if ($item !== '') {
+        if (preg_match('/^TCH([1-3])\b/', $item, $m)) {
+            return 'Teacher ' . toRomanNumeral((int)$m[1]);
+        }
+        if (preg_match('/^MTCHR([1-4])\b/', $item, $m)) {
+            return 'Master Teacher ' . toRomanNumeral((int)$m[1]);
+        }
+        if (preg_match('/^HT([1-6])\b/', $item, $m)) {
+            return 'Head Teacher ' . toRomanNumeral((int)$m[1]);
+        }
+        if (preg_match('/^PRINC(?:IPAL)?([1-4])\b/', $item, $m)) {
+            return 'Principal ' . toRomanNumeral((int)$m[1]);
+        }
+        if (preg_match('/^(?:SPED|SPET)([1-3])\b/', $item, $m)) {
+            return 'Special Education Teacher ' . toRomanNumeral((int)$m[1]);
+        }
+    }
+
+    if (preg_match('/(\d{2})/', strtoupper((string)$salaryGrade), $m)) {
+        $sg = (int)$m[1];
+        return match ($sg) {
+            11 => 'Teacher I',
+            12 => 'Teacher II',
+            13 => 'Teacher III',
+            18 => 'Master Teacher I',
+            19 => 'Master Teacher II',
+            20 => 'Master Teacher III',
+            21 => 'Master Teacher IV',
+            default => null,
+        };
+    }
+
+    return null;
+}
+
+function roleBadge(string $role): string {
+    $map = [
+        'admin'       => 'badge-purple',
+        'hr'          => 'badge-blue',
+        'school_head' => 'badge-cyan',
+        'viewer'      => 'badge-gray',
+    ];
+    $cls = $map[$role] ?? 'badge-gray';
+    return '<span class="badge ' . $cls . '">' . ucfirst(str_replace('_', ' ', $role)) . '</span>';
+}
+
+function jsonResponse(array $data, int $code = 200): void {
+    http_response_code($code);
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode($data, JSON_UNESCAPED_UNICODE);
+    exit();
+}
+
+// XLSX parser (no Composer required – uses ZipArchive + SimpleXML)
+function parseXLSX(string $filepath): array|false {
+    if (!class_exists('ZipArchive')) return false;
+
+    $zip = new ZipArchive();
+    if ($zip->open($filepath) !== true) return false;
+
+    // Shared strings
+    $strings = [];
+    $ssXml   = $zip->getFromName('xl/sharedStrings.xml');
+    if ($ssXml) {
+        $xml = simplexml_load_string($ssXml);
+        if ($xml) {
+            $ns = $xml->getNamespaces(true);
+            $root = isset($ns['']) ? $xml->children($ns['']) : $xml;
+            foreach ($root->si as $si) {
+                $siNode = isset($ns['']) ? $si->children($ns['']) : $si;
+                if (isset($siNode->t)) {
+                    $strings[] = (string)$siNode->t;
+                } else {
+                    $t = '';
+                    foreach ($siNode->r as $r) {
+                        $rNode = isset($ns['']) ? $r->children($ns['']) : $r;
+                        $t .= (string)($rNode->t ?? '');
+                    }
+                    $strings[] = $t;
+                }
+            }
+        }
+    }
+
+    // Find first worksheet path from workbook relationships (more reliable than hardcoded sheet1.xml)
+    $sheetPath = 'xl/worksheets/sheet1.xml';
+    $wbXml = $zip->getFromName('xl/workbook.xml');
+    $relsXml = $zip->getFromName('xl/_rels/workbook.xml.rels');
+    if ($wbXml && $relsXml && class_exists('DOMDocument')) {
+        $wb = new DOMDocument();
+        $rels = new DOMDocument();
+        if (@$wb->loadXML($wbXml) && @$rels->loadXML($relsXml)) {
+            $xpW = new DOMXPath($wb);
+            $xpW->registerNamespace('x', 'http://schemas.openxmlformats.org/spreadsheetml/2006/main');
+            $firstSheet = $xpW->query('//x:sheets/x:sheet[1]')->item(0);
+            $rid = '';
+            if ($firstSheet instanceof DOMElement) {
+                $rid = $firstSheet->getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'id');
+                if ($rid === '') {
+                    $rid = $firstSheet->getAttribute('r:id');
+                }
+            }
+
+            if ($rid !== '') {
+                $xpR = new DOMXPath($rels);
+                $xpR->registerNamespace('rel', 'http://schemas.openxmlformats.org/package/2006/relationships');
+                foreach ($xpR->query('//rel:Relationship') as $relNode) {
+                    if ($relNode->attributes?->getNamedItem('Id')?->nodeValue === $rid) {
+                        $target = $relNode->attributes->getNamedItem('Target')?->nodeValue ?? '';
+                        if ($target !== '') {
+                            $target = str_replace('\\', '/', $target);
+                            $target = ltrim($target, '/');
+                            if (!str_starts_with($target, 'xl/')) {
+                                $target = 'xl/' . ltrim($target, '/');
+                            }
+                            $sheetPath = $target;
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    $sheetXml = $zip->getFromName($sheetPath);
+    if (!$sheetXml) {
+        // Fallback: first available worksheet XML file
+        for ($i = 0; $i < $zip->numFiles; $i++) {
+            $name = $zip->getNameIndex($i);
+            if (is_string($name) && str_starts_with($name, 'xl/worksheets/') && str_ends_with(strtolower($name), '.xml')) {
+                $sheetXml = $zip->getFromName($name);
+                if ($sheetXml) {
+                    break;
+                }
+            }
+        }
+    }
+
+    $zip->close();
+    if (!$sheetXml) return false;
+
+    $xml  = simplexml_load_string($sheetXml);
+    if (!$xml) return false;
+
+    $ns = $xml->getNamespaces(true);
+    $root = isset($ns['']) ? $xml->children($ns['']) : $xml;
+    if (!isset($root->sheetData)) return false;
+
+    $rows = [];
+    foreach ($root->sheetData->row as $row) {
+        $rowNode = isset($ns['']) ? $row->children($ns['']) : $row;
+        $rowArr  = [];
+        $lastIdx = 0;
+        foreach ($rowNode->c as $cell) {
+            $cellNode = isset($ns['']) ? $cell->children($ns['']) : $cell;
+            $colRef = preg_replace('/\d/', '', (string)$cell['r']);
+            $colIdx = xlsxColToIndex($colRef);
+
+            // Fill gaps (merged cells)
+            while ($lastIdx < $colIdx) { $rowArr[] = ''; $lastIdx++; }
+
+            $type  = (string)$cell['t'];
+            $value = '';
+            if ($type === 's') {
+                $value = $strings[(int)($cellNode->v ?? 0)] ?? '';
+            } elseif ($type === 'inlineStr') {
+                $value = (string)($cellNode->is->t ?? '');
+            } elseif (isset($cellNode->v)) {
+                $value = (string)$cellNode->v;
+            }
+            $rowArr[] = trim($value);
+            $lastIdx++;
+        }
+        if (array_filter($rowArr, fn($v) => $v !== '')) {
+            $rows[] = $rowArr;
+        }
+    }
+
+    // Normalize column count
+    if ($rows) {
+        $maxCols = max(array_map('count', $rows));
+        foreach ($rows as &$r) {
+            while (count($r) < $maxCols) $r[] = '';
+        }
+    }
+    return $rows;
+}
+
+function xlsxColToIndex(string $col): int {
+    $col   = strtoupper($col);
+    $index = 0;
+    for ($i = 0, $len = strlen($col); $i < $len; $i++) {
+        $index = $index * 26 + (ord($col[$i]) - 64);
+    }
+    return $index - 1; // 0-based
+}
+
+function parseCSV(string $filepath): array|false {
+    $rows   = [];
+    $handle = fopen($filepath, 'r');
+    if (!$handle) return false;
+
+    // Normalize CSV cell bytes to UTF-8. This fixes uploads from Excel/Windows
+    // CSV exports that are often encoded as ANSI/Windows-1252.
+    $toUtf8 = static function(string $value): string {
+        // Already valid UTF-8
+        if ($value === '' || preg_match('//u', $value)) {
+            return $value;
+        }
+
+        // Prefer iconv if available.
+        if (function_exists('iconv')) {
+            $converted = @iconv('Windows-1252', 'UTF-8//IGNORE', $value);
+            if (is_string($converted) && $converted !== '') {
+                return $converted;
+            }
+            $converted = @iconv('ISO-8859-1', 'UTF-8//IGNORE', $value);
+            if (is_string($converted) && $converted !== '') {
+                return $converted;
+            }
+        }
+
+        // Fallback for single-byte legacy encodings.
+        $result = @utf8_encode($value);
+        return is_string($result) ? $result : $value;
+    };
+
+    // Auto-detect delimiter from first line (handles locales using ';' or '\t')
+    $firstLine = fgets($handle);
+    if ($firstLine === false) { fclose($handle); return false; }
+    rewind($handle);
+    $delims = [',', ';', "\t", '|'];
+    $best   = ',';
+    $maxCnt = -1;
+    foreach ($delims as $d) {
+        $cnt = substr_count($firstLine, $d);
+        if ($cnt > $maxCnt) { $maxCnt = $cnt; $best = $d; }
+    }
+    while (($row = fgetcsv($handle, 0, $best)) !== false) {
+        if (array_filter($row, fn($v) => trim((string)$v) !== '')) {
+            // Convert each cell to UTF-8 before any matching/insert.
+            $row = array_map(fn($v) => $toUtf8((string)$v), $row);
+            // Strip BOM from first cell if present (prevents header mismatches)
+            if (empty($rows) && isset($row[0])) {
+                $row[0] = preg_replace('/^\xEF\xBB\xBF/u', '', $row[0]);
+            }
+            $rows[] = array_map('trim', $row);
+        }
+    }
+    fclose($handle);
+    return $rows;
+}
+
+function ensureTeacherPlanningSchema(PDO $db): void {
+    static $ready = false;
+    if ($ready) return;
+    $ready = true;
+
+    requireDatabaseStructure($db, [
+        'teachers' => [
+            'max_teaching_load_hours',
+            'current_teaching_load_hours',
+            'classes_handled',
+            'students_handled',
+            'max_classes',
+            'advisory_class',
+        ],
+        'schools' => [
+            'school_year',
+            'learner_count',
+            'total_sections',
+            'total_required_classes',
+            'hours_per_class_week',
+            'learners_per_teacher',
+        ],
+        'planning_settings' => [
+            'id',
+            'max_students_per_class',
+            'max_classes_per_teacher',
+            'max_teaching_load_hours',
+            'recommended_student_teacher_ratio',
+            'utilization_threshold_pct',
+            'default_hours_per_class_week',
+        ],
+    ]);
+}
+
+function getPlanningSettings(PDO $db): array {
+    ensureTeacherPlanningSchema($db);
+
+    $defaults = [
+        'max_students_per_class' => (int)PLANNING_DEFAULT_MAX_STUDENTS_PER_CLASS,
+        'max_classes_per_teacher' => (int)PLANNING_DEFAULT_MAX_CLASSES_PER_TEACHER,
+        'max_teaching_load_hours' => (float)PLANNING_DEFAULT_MAX_TEACHING_LOAD_HOURS,
+        'recommended_student_teacher_ratio' => (int)PLANNING_DEFAULT_STUDENT_TEACHER_RATIO,
+        'utilization_threshold_pct' => (float)PLANNING_DEFAULT_UTILIZATION_THRESHOLD,
+        'default_hours_per_class_week' => (float)PLANNING_DEFAULT_HOURS_PER_CLASS_WEEK,
+    ];
+
+    try {
+        $st = $db->query('SELECT * FROM planning_settings WHERE id = 1 LIMIT 1');
+        $row = $st->fetch();
+        if (!$row) return $defaults;
+
+        return [
+            'max_students_per_class' => max(1, (int)($row['max_students_per_class'] ?? $defaults['max_students_per_class'])),
+            'max_classes_per_teacher' => max(1, (int)($row['max_classes_per_teacher'] ?? $defaults['max_classes_per_teacher'])),
+            'max_teaching_load_hours' => max(1, (float)($row['max_teaching_load_hours'] ?? $defaults['max_teaching_load_hours'])),
+            'recommended_student_teacher_ratio' => max(1, (int)($row['recommended_student_teacher_ratio'] ?? $defaults['recommended_student_teacher_ratio'])),
+            'utilization_threshold_pct' => max(1, min(100, (float)($row['utilization_threshold_pct'] ?? $defaults['utilization_threshold_pct']))),
+            'default_hours_per_class_week' => max(0.5, (float)($row['default_hours_per_class_week'] ?? $defaults['default_hours_per_class_week'])),
+        ];
+    } catch (Throwable $e) {
+        error_log('TPMS planning settings warning: ' . $e->getMessage());
+        return $defaults;
+    }
+}
+
+function savePlanningSettings(PDO $db, array $input): bool {
+    ensureTeacherPlanningSchema($db);
+
+    $settings = [
+        'max_students_per_class' => max(1, min(100, (int)($input['max_students_per_class'] ?? PLANNING_DEFAULT_MAX_STUDENTS_PER_CLASS))),
+        'max_classes_per_teacher' => max(1, min(20, (int)($input['max_classes_per_teacher'] ?? PLANNING_DEFAULT_MAX_CLASSES_PER_TEACHER))),
+        'max_teaching_load_hours' => max(1, min(80, (float)($input['max_teaching_load_hours'] ?? PLANNING_DEFAULT_MAX_TEACHING_LOAD_HOURS))),
+        'recommended_student_teacher_ratio' => max(1, min(100, (int)($input['recommended_student_teacher_ratio'] ?? PLANNING_DEFAULT_STUDENT_TEACHER_RATIO))),
+        'utilization_threshold_pct' => max(1, min(100, (float)($input['utilization_threshold_pct'] ?? PLANNING_DEFAULT_UTILIZATION_THRESHOLD))),
+        'default_hours_per_class_week' => max(0.5, min(20, (float)($input['default_hours_per_class_week'] ?? PLANNING_DEFAULT_HOURS_PER_CLASS_WEEK))),
+    ];
+
+    try {
+        $sql = 'INSERT INTO planning_settings
+                    (id, max_students_per_class, max_classes_per_teacher, max_teaching_load_hours, recommended_student_teacher_ratio, utilization_threshold_pct, default_hours_per_class_week)
+                VALUES
+                    (1, :max_students_per_class, :max_classes_per_teacher, :max_teaching_load_hours, :recommended_student_teacher_ratio, :utilization_threshold_pct, :default_hours_per_class_week)
+                ON DUPLICATE KEY UPDATE
+                    max_students_per_class = VALUES(max_students_per_class),
+                    max_classes_per_teacher = VALUES(max_classes_per_teacher),
+                    max_teaching_load_hours = VALUES(max_teaching_load_hours),
+                    recommended_student_teacher_ratio = VALUES(recommended_student_teacher_ratio),
+                    utilization_threshold_pct = VALUES(utilization_threshold_pct),
+                    default_hours_per_class_week = VALUES(default_hours_per_class_week),
+                    updated_at = CURRENT_TIMESTAMP';
+        $db->prepare($sql)->execute($settings);
+        return true;
+    } catch (Throwable $e) {
+        error_log('TPMS planning settings save failed: ' . $e->getMessage());
+        return false;
+    }
+}
+
+function computeSchoolTeacherPlanning(PDO $db, int $schoolId, ?array $settings = null): ?array {
+    ensureTeacherPlanningSchema($db);
+    ensureArchiveSchema($db);
+    requireDatabaseStructure($db, [
+        'teacher_clc_assignments' => ['teacher_id', 'clc_school_id', 'assignment_status'],
+    ]);
+    $settings = $settings ?? getPlanningSettings($db);
+
+    $schoolStmt = $db->prepare(
+        'SELECT * FROM schools WHERE id = ? AND ' . activeArchiveExclusion('school', 'schools.id') . ' LIMIT 1'
+    );
+    $schoolStmt->execute([$schoolId]);
+    $school = $schoolStmt->fetch();
+    if (!$school) return null;
+
+    $code = trim((string)($school['school_id_code'] ?? ''));
+    $name = trim((string)($school['school_name'] ?? ''));
+
+        $teacherSql = 'SELECT t.id, t.first_name, t.last_name, t.position, t.specialization, t.grade_level,
+                 t.birthdate,
+                         t.subjects,
+                          COALESCE(t.max_teaching_load_hours, :default_max_load) AS max_load,
+                          COALESCE(t.current_teaching_load_hours, 0) AS current_load,
+                          COALESCE(t.max_classes, :default_max_classes) AS max_classes,
+                          COALESCE(t.classes_handled, 0) AS classes_handled,
+                         COALESCE(t.students_handled, 0) AS students_handled,
+                          t.advisory_class
+                   FROM teachers t
+                   WHERE ' . activeArchiveExclusion('teacher', 't.id') . '
+                     AND (
+                         t.school_id = :school_id
+                      OR EXISTS (
+                          SELECT 1 FROM teacher_clc_assignments tca_plan
+                          WHERE tca_plan.teacher_id = t.id
+                            AND tca_plan.clc_school_id = :clc_school_id
+                            AND tca_plan.assignment_status = "Active"
+                      )
+                      OR (
+                          t.school_id IS NULL
+                          AND :school_code_check <> ""
+                          AND t.school_id_code_raw IS NOT NULL
+                          AND LOWER(TRIM(t.school_id_code_raw)) = LOWER(:school_code_match)
+                      )
+                      OR (
+                          t.school_id IS NULL
+                          AND :school_name_check <> ""
+                          AND t.school_name_raw IS NOT NULL
+                          AND LOWER(TRIM(t.school_name_raw)) = LOWER(:school_name_match)
+                      )
+                     )
+                   ORDER BY t.last_name, t.first_name';
+
+    $teacherStmt = $db->prepare($teacherSql);
+    $teacherStmt->execute([
+        'default_max_load' => (float)$settings['max_teaching_load_hours'],
+        'default_max_classes' => (int)$settings['max_classes_per_teacher'],
+        'school_id' => $schoolId,
+        'clc_school_id' => $schoolId,
+        'school_code_check' => $code,
+        'school_code_match' => $code,
+        'school_name_check' => $name,
+        'school_name_match' => $name,
+    ]);
+    $teachers = $teacherStmt->fetchAll();
+
+    $teacherCount = count($teachers);
+    $totalStudents = max(0, (int)($school['learner_count'] ?? 0));
+    $totalSections = max(0, (int)($school['total_sections'] ?? 0));
+    $requiredClassesInput = max(0, (int)($school['total_required_classes'] ?? 0));
+    $requiredClasses = $requiredClassesInput > 0 ? $requiredClassesInput : $totalSections;
+    $hoursPerClass = max(0.5, (float)($school['hours_per_class_week'] ?? $settings['default_hours_per_class_week']));
+    $requiredTeachingHours = $requiredClasses * $hoursPerClass;
+
+    $teachersNeededByRatio = (int)ceil($totalStudents / max(1, (int)$settings['recommended_student_teacher_ratio']));
+
+    $capacityHours = 0.0;
+    $capacityClasses = 0;
+    $usedHours = 0.0;
+    $usedClasses = 0;
+    $usedStudents = 0;
+    $overloadedTeachers = 0;
+    $underloadedTeachers = 0;
+    $possibleRetirees = 0;
+
+    $teacherRows = [];
+    foreach ($teachers as $teacher) {
+        $maxLoad = max(1, (float)$teacher['max_load']);
+        $currentLoad = max(0, (float)$teacher['current_load']);
+        $maxClasses = max(1, (int)$teacher['max_classes']);
+        $classesHandled = max(0, (int)$teacher['classes_handled']);
+        $studentsHandled = max(0, (int)$teacher['students_handled']);
+        $teacherAge = calcAge((string)($teacher['birthdate'] ?? ''));
+        $retirementRisk = 'Not Near Retirement';
+        if ($teacherAge !== null && $teacherAge >= 60) {
+            $retirementRisk = 'Possible Retiree';
+            $possibleRetirees++;
+        } elseif ($teacherAge !== null && $teacherAge >= 55) {
+            $retirementRisk = 'Near Retirement';
+        }
+
+        $utilizationPct = $maxLoad > 0 ? ($currentLoad / $maxLoad) * 100 : 0;
+        $isOverloaded = $currentLoad > $maxLoad || $classesHandled > $maxClasses;
+        $isUnderloaded = !$isOverloaded && $utilizationPct < (float)$settings['utilization_threshold_pct'] && $classesHandled < $maxClasses;
+
+        if ($isOverloaded) {
+            $status = 'Overloaded';
+            $overloadedTeachers++;
+        } elseif ($utilizationPct >= (float)$settings['utilization_threshold_pct']) {
+            $status = 'Full Load';
+        } else {
+            $status = 'Available';
+            if ($isUnderloaded) $underloadedTeachers++;
+        }
+
+        $capacityHours += $maxLoad;
+        $capacityClasses += $maxClasses;
+        $usedHours += $currentLoad;
+        $usedClasses += $classesHandled;
+        $usedStudents += $studentsHandled;
+
+        $teacherRows[] = [
+            'id' => (int)($teacher['id'] ?? 0),
+            'name' => trim((string)($teacher['last_name'] ?? '') . ', ' . (string)($teacher['first_name'] ?? '')),
+            'position' => (string)($teacher['position'] ?? ''),
+            'specialization' => (string)($teacher['specialization'] ?? ''),
+            'subjects' => (string)($teacher['subjects'] ?? ''),
+            'grade_level' => (string)($teacher['grade_level'] ?? ''),
+            'age' => $teacherAge,
+            'retirement_risk' => $retirementRisk,
+            'current_load' => $currentLoad,
+            'max_load' => $maxLoad,
+            'classes_handled' => $classesHandled,
+            'students_handled' => $studentsHandled,
+            'max_classes' => $maxClasses,
+            'utilization_pct' => $utilizationPct,
+            'status' => $status,
+            'advisory_class' => (string)($teacher['advisory_class'] ?? ''),
+        ];
+    }
+
+    $teacherHoursStd = max(1, (float)$settings['max_teaching_load_hours']);
+    $teacherClassesStd = max(1, (int)$settings['max_classes_per_teacher']);
+
+    // Compute required teachers by demand, not by current staffing, to avoid
+    // inflated "teachers needed" values when students/classes are zero.
+    $teachersNeededByLoad = $requiredTeachingHours > 0
+        ? (int)ceil($requiredTeachingHours / $teacherHoursStd)
+        : 0;
+    $teachersNeededByClass = $requiredClasses > 0
+        ? (int)ceil($requiredClasses / $teacherClassesStd)
+        : 0;
+    $recommendedTeachers = max($teachersNeededByRatio, $teachersNeededByLoad, $teachersNeededByClass);
+    $shortage = max(0, $recommendedTeachers - $teacherCount);
+    $surplus = max(0, $teacherCount - $recommendedTeachers);
+
+    $recommendations = [];
+    if ($shortage > 0) {
+        $recommendations[] = 'Teacher shortage: Hire or deploy ' . $shortage . ' additional teacher(s).';
+    }
+    if ($overloadedTeachers > 0) {
+        $recommendations[] = 'Teacher overload: Redistribute class assignments among available teachers.';
+    }
+    if ($surplus > 0) {
+        $recommendations[] = 'Teacher surplus: Consider redeployment to schools with staffing shortages.';
+    }
+    if ($possibleRetirees > 0) {
+        $recommendations[] = 'Retirement watch: ' . $possibleRetirees . ' teacher(s) are possible retirees (age 60+).';
+    }
+    if (!$recommendations) {
+        $recommendations[] = 'Balanced staffing: Current teacher allocation meets planning standards.';
+    }
+
+    $ratioNow = ($teacherCount > 0 && $totalStudents > 0)
+        ? round($totalStudents / $teacherCount, 1)
+        : null;
+
+    return [
+        'school' => $school,
+        'settings' => $settings,
+        'teacher_rows' => $teacherRows,
+        'summary' => [
+            'total_students' => $totalStudents,
+            'total_teachers' => $teacherCount,
+            'student_teacher_ratio_actual' => $ratioNow,
+            'total_sections' => $totalSections,
+            'required_classes' => $requiredClasses,
+            'hours_per_class_week' => $hoursPerClass,
+            'required_teaching_hours' => $requiredTeachingHours,
+            'capacity_hours' => $capacityHours,
+            'used_hours' => $usedHours,
+            'capacity_classes' => $capacityClasses,
+            'used_classes' => $usedClasses,
+            'used_students' => $usedStudents,
+            'teachers_needed_ratio' => $teachersNeededByRatio,
+            'teachers_needed_load' => $teachersNeededByLoad,
+            'teachers_needed_classes' => $teachersNeededByClass,
+            'recommended_teachers' => $recommendedTeachers,
+            'teacher_shortage' => $shortage,
+            'teacher_surplus' => $surplus,
+            'overloaded_teachers' => $overloadedTeachers,
+            'underloaded_teachers' => $underloadedTeachers,
+            'possible_retirees' => $possibleRetirees,
+        ],
+        'recommendations' => $recommendations,
+    ];
+}
+
+function tpmsTableExists(PDO $db, string $table): bool {
+    try {
+        $st = $db->prepare('SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ?');
+        $st->execute([$table]);
+        return ((int)$st->fetchColumn()) > 0;
+    } catch (Throwable) {
+        return false;
+    }
+}
+
+function tpmsColumnExists(PDO $db, string $table, string $column): bool {
+    try {
+        $st = $db->prepare('SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?');
+        $st->execute([$table, $column]);
+        return ((int)$st->fetchColumn()) > 0;
+    } catch (Throwable) {
+        return false;
+    }
+}
+
+function tpmsIndexExists(PDO $db, string $table, string $index): bool {
+    try {
+        $st = $db->prepare('SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ?');
+        $st->execute([$table, $index]);
+        return ((int)$st->fetchColumn()) > 0;
+    } catch (Throwable) {
+        return false;
+    }
+}
+
+/**
+ * Add missing performance indexes in a safe, idempotent way.
+ * Returns a report with created/skipped/error index operations.
+ */
+function ensureDatabasePerformanceIndexes(PDO $db): array {
+    $report = [
+        'created' => [],
+        'skipped' => [],
+        'errors' => [],
+    ];
+
+    $indexPlan = [
+        'teachers' => [
+            ['name' => 'idx_district_raw', 'columns' => ['district_raw']],
+            ['name' => 'idx_school_name_raw', 'columns' => ['school_name_raw']],
+            ['name' => 'idx_retirement_date', 'columns' => ['retirement_date']],
+            ['name' => 'idx_pwd_status', 'columns' => ['pwd_status']],
+            ['name' => 'idx_gender_position', 'columns' => ['gender', 'position']],
+            ['name' => 'idx_school_position', 'columns' => ['school_id', 'position']],
+        ],
+        'schools' => [
+            ['name' => 'idx_school_name', 'columns' => ['school_name']],
+            ['name' => 'idx_district_type', 'columns' => ['district_id', 'school_type']],
+            ['name' => 'idx_type_municipality', 'columns' => ['school_type', 'municipality']],
+        ],
+        'users' => [
+            ['name' => 'idx_role_active', 'columns' => ['role', 'is_active']],
+            ['name' => 'idx_last_login', 'columns' => ['last_login']],
+        ],
+        'activity_logs' => [
+            ['name' => 'idx_module_date', 'columns' => ['module', 'created_at']],
+            ['name' => 'idx_user_date', 'columns' => ['user_id', 'created_at']],
+            ['name' => 'idx_action_date', 'columns' => ['action', 'created_at']],
+        ],
+        'upload_logs' => [
+            ['name' => 'idx_uploaded_by_date', 'columns' => ['uploaded_by', 'created_at']],
+        ],
+        'announcements' => [
+            ['name' => 'idx_active_publish', 'columns' => ['is_active', 'publish_at']],
+        ],
+        'announcement_reads' => [
+            ['name' => 'idx_announcement_read_at', 'columns' => ['announcement_id', 'read_at']],
+        ],
+    ];
+
+    foreach ($indexPlan as $table => $indexes) {
+        if (!tpmsTableExists($db, $table)) {
+            $report['skipped'][] = $table . ': table not found';
+            continue;
+        }
+
+        foreach ($indexes as $idx) {
+            $indexName = (string)$idx['name'];
+            $columns = is_array($idx['columns']) ? $idx['columns'] : [];
+            if ($indexName === '' || !$columns) {
+                continue;
+            }
+
+            if (tpmsIndexExists($db, $table, $indexName)) {
+                $report['skipped'][] = $table . '.' . $indexName . ': already exists';
+                continue;
+            }
+
+            $missing = [];
+            foreach ($columns as $col) {
+                if (!tpmsColumnExists($db, $table, (string)$col)) {
+                    $missing[] = (string)$col;
+                }
+            }
+            if ($missing) {
+                $report['skipped'][] = $table . '.' . $indexName . ': missing column(s) ' . implode(', ', $missing);
+                continue;
+            }
+
+            $safeCols = [];
+            foreach ($columns as $col) {
+                $safeCols[] = '`' . str_replace('`', '', (string)$col) . '`';
+            }
+            $safeTable = '`' . str_replace('`', '', $table) . '`';
+            $safeIndex = '`' . str_replace('`', '', $indexName) . '`';
+            $sql = 'ALTER TABLE ' . $safeTable . ' ADD INDEX ' . $safeIndex . ' (' . implode(', ', $safeCols) . ')';
+
+            try {
+                $db->exec($sql);
+                $report['created'][] = $table . '.' . $indexName;
+            } catch (Throwable $e) {
+                $report['errors'][] = $table . '.' . $indexName . ': ' . $e->getMessage();
+            }
+        }
+    }
+
+    return $report;
+}
+
+/**
+ * Get all districts assigned to a user (for PSDS/SDC/Unit Head)
+ * Returns array of district IDs, or single district_id if set on user record
+ */
+function getUserDistricts(PDO $db, int $userId): array {
+    $districts = [];
+
+    $userStmt = $db->prepare('SELECT role, district_id FROM users WHERE id = ? LIMIT 1');
+    $userStmt->execute([$userId]);
+    $user = $userStmt->fetch();
+    if (!$user) return [];
+    
+    $role = strtolower($user['role'] ?? '');
+    if (in_array($role, ['psds', 'sdc', 'unit_head'], true)) {
+        // Prefer the junction table so an account can be assigned to multiple
+        // districts. Retain users.district_id as a backward-compatible fallback.
+        try {
+            $assignmentStmt = $db->prepare(
+                'SELECT district_id FROM user_districts WHERE user_id = ? ORDER BY district_id'
+            );
+            $assignmentStmt->execute([$userId]);
+            $districts = array_map('intval', $assignmentStmt->fetchAll(PDO::FETCH_COLUMN));
+        } catch (Throwable $e) {
+            $districts = [];
+        }
+
+        if (!$districts && (int)($user['district_id'] ?? 0) > 0) {
+            $districts[] = (int)$user['district_id'];
+        }
+    }
+    
+    return array_map('intval', array_unique(array_filter($districts)));
+}
+
+/**
+ * Check if user can access a specific district
+ */
+function userCanAccessDistrict(PDO $db, int $userId, int $districtId): bool {
+    $user = getUserById($db, $userId);
+    if (!$user) return false;
+    
+    $role = strtolower($user['role'] ?? '');
+    
+    // Admin can access everything
+    if ($role === 'admin') return true;
+    
+    // Check assigned districts
+    $assignedDistricts = getUserDistricts($db, $userId);
+    return in_array($districtId, $assignedDistricts, true);
+}
+
+/**
+ * Get user by ID
+ */
+function getUserById(PDO $db, int $userId): ?array {
+    $stmt = $db->prepare('SELECT * FROM users WHERE id = ? LIMIT 1');
+    $stmt->execute([$userId]);
+    $user = $stmt->fetch();
+    return $user ?: null;
+}
+
+/**
+ * Get role display name with color
+ */
+function getRoleDisplayName(string $role): string {
+    return match(strtolower($role)) {
+        'admin' => 'Administrator',
+        'hr' => 'HR / Personnel',
+        'school_head' => 'School Head',
+        'unit_head' => 'Unit Head',
+        'psds' => 'PSDS',
+        'sdc' => 'SDC',
+        'viewer' => 'Viewer',
+        default => ucfirst(str_replace('_', ' ', $role)),
+    };
+}
+
+/**
+ * Get selected district for current session (used after district selection)
+ */
+function getSessionDistrict(): ?int {
+    return isset($_SESSION['selected_district_id']) ? (int)$_SESSION['selected_district_id'] : null;
+}
+
+/**
+ * Set selected district for current session
+ */
+function setSessionDistrict(int $districtId): void {
+    $_SESSION['selected_district_id'] = $districtId;
+}
+
+/**
+ * Clear selected district from session
+ */
+function clearSessionDistrict(): void {
+    unset($_SESSION['selected_district_id']);
+}
+
+/**
+ * Check if current user should filter by district
+ * Returns true if user has a selected district and is not admin
+ */
+function shouldFilterByDistrict(): bool {
+    $userRole = strtolower($_SESSION['role'] ?? '');
+    $selectedDistrict = getSessionDistrict();
+    
+    // Admins and HR can see all data (no district filter)
+    if (in_array($userRole, ['admin', 'hr'], true)) {
+        return false;
+    }
+    
+    // PSDS, SDC, Unit Head - ONLY see their assigned district
+    if (in_array($userRole, ['psds', 'sdc', 'unit_head'], true)) {
+        return $selectedDistrict !== null;
+    }
+    
+    return false;
+}
+
+/**
+ * Get district filter clause for SQL queries
+ * Returns WHERE clause fragment or empty string
+ */
+function getDistrictFilterClause(string $tableAlias = 's'): string {
+    if (!shouldFilterByDistrict()) {
+        return '';
+    }
+    
+    $districtId = getSessionDistrict();
+    if ($districtId === null) {
+        return '';
+    }
+    
+    return " AND $tableAlias.district_id = " . (int)$districtId;
+}
+
+/**
+ * Get current user's selected district name
+ */
+function getSelectedDistrictName(PDO $db): ?string {
+    $districtId = getSessionDistrict();
+    if ($districtId === null) {
+        return null;
+    }
+    
+    $stmt = $db->prepare('SELECT district_name FROM districts WHERE id = ? LIMIT 1');
+    $stmt->execute([$districtId]);
+    $result = $stmt->fetch();
+    
+    return $result ? (string)($result['district_name'] ?? null) : null;
+}
+
+/** Ensure the account has a role assigned by an administrator. */
+function requireRoleSelection(): void {
+    // First check session
+    $userRole = $_SESSION['role'] ?? null;
+    
+    if ($userRole === null || $userRole === '' || strtolower((string)$userRole) === 'null') {
+        // Verify with database
+        if (isset($_SESSION['user_id'])) {
+            try {
+                $db = getDB();
+                $stmt = $db->prepare('SELECT role FROM users WHERE id = ? LIMIT 1');
+                $stmt->execute([(int)$_SESSION['user_id']]);
+                $dbRole = $stmt->fetchColumn();
+                
+                if ($dbRole === null || $dbRole === '' || strtolower((string)$dbRole) === 'null' || $dbRole === false) {
+                    redirect(APP_URL . '/select-role');
+                }
+                
+                // Database has a real role but session doesn't - update session
+                $_SESSION['role'] = $dbRole;
+            } catch (Throwable $e) {
+                // Database error - force role selection to be safe
+                redirect(APP_URL . '/select-role');
+            }
+        } else {
+            // No user ID in session - force role selection
+            redirect(APP_URL . '/select-role');
+        }
+    }
+}
+
+/**
+ * Ensure chat system tables exist.
+ * Supports direct messages and custom group chats retained from v1.10.0.
+ */
+function ensureChatSystemSchema(PDO $db): void {
+    static $ensured = false;
+    if ($ensured) {
+        return;
+    }
+
+    $db->exec("CREATE TABLE IF NOT EXISTS chat_groups (
+        id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        group_name VARCHAR(120) NOT NULL,
+        created_by INT NOT NULL,
+        is_archived TINYINT(1) NOT NULL DEFAULT 0,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_chat_groups_created_by (created_by),
+        INDEX idx_chat_groups_active (is_archived, updated_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+    $db->exec("CREATE TABLE IF NOT EXISTS chat_group_members (
+        id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        group_id BIGINT UNSIGNED NOT NULL,
+        user_id INT NOT NULL,
+        member_role VARCHAR(16) NOT NULL DEFAULT 'member',
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uniq_group_user (group_id, user_id),
+        INDEX idx_group_member_user (user_id),
+        INDEX idx_group_member_group (group_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+    $db->exec("CREATE TABLE IF NOT EXISTS chat_messages (
+        id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        sender_id INT NOT NULL,
+        recipient_id INT NULL,
+        group_id BIGINT UNSIGNED NULL,
+        message_text TEXT NOT NULL,
+        is_read TINYINT(1) NOT NULL DEFAULT 0,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_chat_group_created (group_id, created_at),
+        INDEX idx_chat_recipient_created (recipient_id, created_at),
+        INDEX idx_chat_sender_created (sender_id, created_at),
+        INDEX idx_chat_direct_lookup (sender_id, recipient_id, id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+    if (!tpmsColumnExists($db, 'chat_messages', 'group_id')) {
+        $db->exec('ALTER TABLE chat_messages ADD COLUMN group_id BIGINT UNSIGNED NULL AFTER recipient_id');
+    }
+
+    if (!tpmsIndexExists($db, 'chat_messages', 'idx_chat_group_created')) {
+        $db->exec('ALTER TABLE chat_messages ADD INDEX idx_chat_group_created (group_id, created_at)');
+    }
+
+    $ensured = true;
+}

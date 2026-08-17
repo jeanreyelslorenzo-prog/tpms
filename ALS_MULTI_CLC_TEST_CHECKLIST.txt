@@ -1,0 +1,48 @@
+ALS MULTI-CLC STAGING TEST CHECKLIST
+====================================
+
+Run migrations 001 through 005 on a current database backup before testing.
+
+1. School program setup
+   [ ] Create a Formal Education-only school and select formal offerings.
+   [ ] Create an ALS-only center and select at least one ALS offering.
+   [ ] Create a formal school that also offers ALS.
+   [ ] Confirm each record appears under the correct Schools and ALS filters.
+
+2. Teacher with several CLCs
+   [ ] Add one teacher with an official school station.
+   [ ] Select two or more ALS CLCs for one school year.
+   [ ] Mark exactly one selected CLC as primary.
+   [ ] Confirm only one teacher record is created.
+   [ ] Confirm the teacher profile lists every active CLC assignment.
+
+3. Assignment editing and history
+   [ ] Edit the teacher and uncheck one CLC.
+   [ ] Confirm that CLC becomes Inactive instead of being deleted.
+   [ ] Add a different CLC and confirm the active count is correct.
+   [ ] Confirm an invalid/non-consecutive school year is rejected inline.
+
+4. Cross-module behavior
+   [ ] Filter Teachers by each assigned CLC; the teacher appears once.
+   [ ] Open each ALS center; teacher and primary-teacher counts are correct.
+   [ ] Check Reports, Retirement Watch, and Requirement Planning filters.
+   [ ] Export the filtered teacher, school, and retirement lists.
+   [ ] Confirm no teacher is duplicated because of multiple CLC assignments.
+
+5. Roles and district scope
+   [ ] Admin and HR can create/update assignments.
+   [ ] Viewer can read but cannot edit.
+   [ ] PSDS/SDC/Unit Head cannot assign or view records outside the selected
+       district.
+   [ ] Invalid or expired CSRF submissions are rejected.
+
+6. Preserved v1.10.0 modules
+   [ ] Team Chat sends, fetches, groups, and shows notifications.
+   [ ] My Activity and admin Logs still load and record relevant actions.
+   [ ] Existing bookmarks and forms using root *.php/actions/*.php URLs work.
+
+7. Upgrade safety
+   [ ] Existing teachers, schools, users, photos, and encrypted URLs still work.
+   [ ] config/local.php and the existing encryption key were preserved.
+   [ ] setup.php was not run against the upgraded live/staging database.
+   [ ] A rollback backup is available before production deployment.
