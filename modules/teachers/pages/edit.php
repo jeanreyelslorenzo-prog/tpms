@@ -145,6 +145,7 @@ if ($selectedDistrictId <= 0 && trim((string)($data['district_raw'] ?? '')) !== 
                        maxlength="<?= (int)$teacherTextLimits[$name] ?>" <?= $req ? 'required' : '' ?>
                        <?= $name === 'contact_number' ? 'inputmode="numeric" pattern="09[0-9]{9}" oninput="this.value=this.value.replace(/\D/g,\'\').slice(0,11)"' : '' ?>
                        <?= $name === 'employee_number' ? 'inputmode="numeric" minlength="7" pattern="[0-9]{7}" oninput="this.value=this.value.replace(/\D/g,\'\').slice(0,7)"' : '' ?>
+                       <?= in_array($name, ['first_name', 'middle_name', 'last_name'], true) ? 'data-person-name pattern="[\p{L}\p{M} -]+" title="Use letters, spaces, and hyphens only."' : '' ?>
                        class="form-input <?= isset($errors[$name]) ? 'is-invalid' : '' ?>"
                        value="<?= clean($data[$name] ?? '') ?>">
                 <?php if (!empty($errors[$name])): ?><span class="form-error"><?= clean($errors[$name]) ?></span><?php endif; ?>

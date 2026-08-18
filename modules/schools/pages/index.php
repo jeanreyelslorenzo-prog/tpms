@@ -1449,9 +1449,9 @@ if ($districtFilter !== '') {
                 </div>
                 <div id="newHeadFields" class="form-grid" style="display:none;">
                     <div class="form-group"><label class="form-label required">Employee Number</label><input class="form-input" inputmode="numeric" name="head_employee_number" minlength="7" maxlength="7" pattern="[0-9]{7}" oninput="this.value=this.value.replace(/\D/g,'').slice(0,7)" value="<?= clean($setupFormData['head_employee_number'] ?? '') ?>"></div>
-                    <div class="form-group"><label class="form-label required">First Name</label><input class="form-input" name="head_first_name" maxlength="60" value="<?= clean($setupFormData['head_first_name'] ?? '') ?>"></div>
-                    <div class="form-group"><label class="form-label">Middle Name</label><input class="form-input" name="head_middle_name" maxlength="60" value="<?= clean($setupFormData['head_middle_name'] ?? '') ?>"></div>
-                    <div class="form-group"><label class="form-label required">Last Name</label><input class="form-input" name="head_last_name" maxlength="60" value="<?= clean($setupFormData['head_last_name'] ?? '') ?>"></div>
+                    <div class="form-group"><label class="form-label required">First Name</label><input class="form-input" name="head_first_name" maxlength="60" data-person-name pattern="[\p{L}\p{M} -]+" title="Use letters, spaces, and hyphens only." value="<?= clean($setupFormData['head_first_name'] ?? '') ?>"></div>
+                    <div class="form-group"><label class="form-label">Middle Name</label><input class="form-input" name="head_middle_name" maxlength="60" data-person-name pattern="[\p{L}\p{M} -]+" title="Use letters, spaces, and hyphens only." value="<?= clean($setupFormData['head_middle_name'] ?? '') ?>"></div>
+                    <div class="form-group"><label class="form-label required">Last Name</label><input class="form-input" name="head_last_name" maxlength="60" data-person-name pattern="[\p{L}\p{M} -]+" title="Use letters, spaces, and hyphens only." value="<?= clean($setupFormData['head_last_name'] ?? '') ?>"></div>
                     <div class="form-group" style="grid-column:1/-1;"><label class="form-label">Position</label><input class="form-input" name="head_position" maxlength="100" value="<?= clean($setupFormData['head_position'] ?? 'School Principal') ?>"></div>
                 </div>
             </div>
@@ -1708,9 +1708,9 @@ function addQuickTeacherRow(values = {}) {
     row.style.cssText = 'display:grid;grid-template-columns:1.1fr 1fr 1fr 1fr 1.1fr auto;gap:8px;align-items:end;margin-bottom:10px;';
     row.innerHTML =
         '<div class="form-group"><label class="form-label">Employee No.</label><input class="form-input" inputmode="numeric" name="teacher_employee_number[]" minlength="7" maxlength="7" pattern="[0-9]{7}" oninput="this.value=this.value.replace(/\\D/g,\'\').slice(0,7)" value="' + escapeQuickTeacherValue(values.employee_number) + '"></div>' +
-        '<div class="form-group"><label class="form-label">First Name</label><input class="form-input" name="teacher_first_name[]" maxlength="60" value="' + escapeQuickTeacherValue(values.first_name) + '"></div>' +
-        '<div class="form-group"><label class="form-label">Middle Name</label><input class="form-input" name="teacher_middle_name[]" maxlength="60" value="' + escapeQuickTeacherValue(values.middle_name) + '"></div>' +
-        '<div class="form-group"><label class="form-label">Last Name</label><input class="form-input" name="teacher_last_name[]" maxlength="60" value="' + escapeQuickTeacherValue(values.last_name) + '"></div>' +
+        '<div class="form-group"><label class="form-label">First Name</label><input class="form-input" name="teacher_first_name[]" maxlength="60" data-person-name pattern="[\\p{L}\\p{M} -]+" title="Use letters, spaces, and hyphens only." value="' + escapeQuickTeacherValue(values.first_name) + '"></div>' +
+        '<div class="form-group"><label class="form-label">Middle Name</label><input class="form-input" name="teacher_middle_name[]" maxlength="60" data-person-name pattern="[\\p{L}\\p{M} -]+" title="Use letters, spaces, and hyphens only." value="' + escapeQuickTeacherValue(values.middle_name) + '"></div>' +
+        '<div class="form-group"><label class="form-label">Last Name</label><input class="form-input" name="teacher_last_name[]" maxlength="60" data-person-name pattern="[\\p{L}\\p{M} -]+" title="Use letters, spaces, and hyphens only." value="' + escapeQuickTeacherValue(values.last_name) + '"></div>' +
         '<div class="form-group"><label class="form-label">Position</label><input class="form-input" name="teacher_position[]" maxlength="100" value="' + escapeQuickTeacherValue(values.position || 'Teacher I') + '"></div>' +
         '<button type="button" class="btn btn-sm btn-danger" style="margin-bottom:1px;" title="Remove row"><i class="fas fa-trash"></i></button>';
     row.querySelector('button').addEventListener('click', () => row.remove());

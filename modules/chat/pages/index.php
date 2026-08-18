@@ -573,19 +573,24 @@ $chatGroups = $groupsStmt->fetchAll(PDO::FETCH_ASSOC);
 
         try {
             setSyncStatus('Syncing...');
-            const url = new URL(<?= json_encode(APP_URL . '/actions/chat_fetch.php') ?>, window.location.origin);
-            url.searchParams.set('mode', activeMode);
-            url.searchParams.set('since_id', String(sinceId));
+            const body = new URLSearchParams();
+            body.set('csrf_token', csrf);
+            body.set('mode', activeMode);
+            body.set('since_id', String(sinceId));
             if (activeMode === 'dm') {
-                url.searchParams.set('recipient_id', String(activeId));
+                body.set('recipient_id', String(activeId));
             } else {
-                url.searchParams.set('group_id', String(activeId));
+                body.set('group_id', String(activeId));
             }
 
-            const res = await fetch(url.toString(), {
-                method: 'GET',
+            const res = await fetch(<?= json_encode(APP_URL . '/actions/chat_fetch.php') ?>, {
+                method: 'POST',
                 credentials: 'same-origin',
-                headers: { Accept: 'application/json' }
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                    Accept: 'application/json'
+                },
+                body: body.toString()
             });
             const data = await res.json();
             if (!res.ok || !data.ok) {

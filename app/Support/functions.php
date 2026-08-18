@@ -78,8 +78,8 @@ function validateTeacherInputFields(array $data): array {
     }
     foreach (['first_name', 'middle_name', 'last_name'] as $field) {
         $value = (string)($data[$field] ?? '');
-        if ($value !== '' && !preg_match("/^[\p{L}\p{M} .'-]+$/u", $value)) {
-            $errors[$field] = 'Use letters, spaces, apostrophes, periods, or hyphens only.';
+        if ($value !== '' && !preg_match('/^[\p{L}\p{M} -]+$/u', $value)) {
+            $errors[$field] = 'Use letters, spaces, and hyphens only.';
         }
     }
     $extension = (string)($data['extension_name'] ?? '');

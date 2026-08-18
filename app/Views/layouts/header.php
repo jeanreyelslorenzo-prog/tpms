@@ -758,10 +758,13 @@ $isAppWindow = isset($_GET['app_window']) && $_GET['app_window'] === '1';
                         <?php endif; ?>
                     </div>
                 </div>
-                <a href="<?= APP_URL ?>/actions/logout" class="topbar-logout" title="Logout">
-                    <i class="fas fa-sign-out-alt"></i>
-                    <span>Logout</span>
-                </a>
+                <form method="POST" action="<?= APP_URL ?>/actions/logout.php" style="display:inline;margin:0">
+                    <input type="hidden" name="csrf_token" value="<?= csrfToken() ?>">
+                    <button type="submit" class="topbar-logout" title="Logout" style="cursor:pointer">
+                        <i class="fas fa-sign-out-alt"></i>
+                        <span>Logout</span>
+                    </button>
+                </form>
             </div>
         </div>
     </header>

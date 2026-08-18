@@ -603,9 +603,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <button type="submit" id="continueBtn" style="padding: 15px 50px; background: linear-gradient(135deg, #fff, #f0f4f6); color: #667eea; border: none; border-radius: 10px; font-size: 1.05em; font-weight: 700; cursor: pointer; transition: all 0.3s ease; box-shadow: 0 8px 20px rgba(0, 0, 0, 0.2); min-width: 200px;">
                 <i class="fas fa-arrow-right"></i> Continue
             </button>
-            <a href="<?= APP_URL ?>/actions/logout.php" style="padding: 15px 50px; background: rgba(255, 255, 255, 0.2); color: #fff; border: 2px solid rgba(255, 255, 255, 0.5); border-radius: 10px; font-size: 1.05em; font-weight: 700; text-align: center; text-decoration: none; cursor: pointer; transition: all 0.3s ease; min-width: 200px;">
+            <button type="submit" formaction="<?= APP_URL ?>/actions/logout.php" formmethod="POST" style="padding: 15px 50px; background: rgba(255, 255, 255, 0.2); color: #fff; border: 2px solid rgba(255, 255, 255, 0.5); border-radius: 10px; font-size: 1.05em; font-weight: 700; text-align: center; text-decoration: none; cursor: pointer; transition: all 0.3s ease; min-width: 200px;">
                 <i class="fas fa-arrow-left"></i> Go Back
-            </a>
+            </button>
         </div>
     </form>
 </div>

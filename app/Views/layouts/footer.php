@@ -1643,5 +1643,19 @@ html[data-theme="pastel-sunset"] body.tpms-tour-dock-visible .app-dock {
 })();
 </script>
 
+<script>
+// Keep person names and integer-style inputs within their permitted character sets.
+document.addEventListener('input', function (event) {
+    const field = event.target;
+    if (!(field instanceof HTMLInputElement)) return;
+
+    if (field.matches('[data-person-name]')) {
+        field.value = field.value.replace(/[^\p{L}\p{M} -]/gu, '');
+    } else if (field.inputMode === 'numeric') {
+        field.value = field.value.replace(/\D/g, '');
+    }
+});
+</script>
+
 </body>
 </html>

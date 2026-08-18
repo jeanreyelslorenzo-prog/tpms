@@ -27,7 +27,10 @@ http_response_code(403);
         <img src="<?= APP_URL ?>/assets/images/logo.png" alt="TalaGuro" style="width:82px;height:82px;object-fit:contain;">
         <h1 style="margin:16px 0 8px;">Account awaiting role assignment</h1>
         <p class="text-muted">Your account is active, but an administrator has not assigned its access role yet. Please contact the TPMS administrator.</p>
-        <a class="btn btn-ghost" href="<?= APP_URL ?>/actions/logout.php" style="margin-top:20px;">Sign out</a>
+        <form method="POST" action="<?= APP_URL ?>/actions/logout.php">
+            <input type="hidden" name="csrf_token" value="<?= csrfToken() ?>">
+            <button type="submit" class="btn btn-ghost" style="margin-top:20px;">Sign out</button>
+        </form>
     </section>
 </main>
 </body>

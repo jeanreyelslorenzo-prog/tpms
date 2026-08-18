@@ -4,6 +4,8 @@
 
 # ── Security Headers ──────────────────────────────────────────
 <IfModule mod_headers.c>
+    # Modern clickjacking protection; retain X-Frame-Options below for legacy browsers.
+    Header always set Content-Security-Policy "frame-ancestors 'self'"
     Header always set X-Frame-Options "SAMEORIGIN"
     Header always set X-Content-Type-Options "nosniff"
     Header always set X-XSS-Protection "1; mode=block"

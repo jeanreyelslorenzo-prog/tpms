@@ -27,6 +27,8 @@ function startSecureSession(): void {
 
 function sendSecurityHeaders(): void {
     if (headers_sent()) return;
+    // CSP frame-ancestors is the modern control; X-Frame-Options supports older browsers.
+    header("Content-Security-Policy: frame-ancestors 'self'");
     header('X-Frame-Options: SAMEORIGIN');
     header('X-Content-Type-Options: nosniff');
     header('Referrer-Policy: strict-origin-when-cross-origin');
@@ -452,21 +454,26 @@ function isAdmin(): bool {
 }
 
 function csrfToken(): string {
-    $now = time();
-    $tokenExpiry = 300; // 5 minutes
-    
-    if (empty($_SESSION['csrf_token']) || 
-        empty($_SESSION['csrf_token_time']) || 
-        $now - $_SESSION['csrf_token_time'] > $tokenExpiry) {
+    // Keep one high-entropy synchronizer token for the authenticated session.
+    // Rotating while another form is open causes valid multi-tab submissions to fail.
+    if (empty($_SESSION['csrf_token'])) {
         $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
-        $_SESSION['csrf_token_time'] = $now;
+        $_SESSION['csrf_token_time'] = time();
     }
     return $_SESSION['csrf_token'];
 }
 
 function verifyCsrf(): void {
-    $token = $_POST['csrf_token'] ?? '';
-    if (!hash_equals($_SESSION['csrf_token'] ?? '', $token)) {
+    if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
+        http_response_code(405);
+        header('Allow: POST');
+        exit('Method Not Allowed');
+    }
+
+    $token = is_string($_POST['csrf_token'] ?? null) ? $_POST['csrf_token'] : '';
+    $sessionToken = is_string($_SESSION['csrf_token'] ?? null) ? $_SESSION['csrf_token'] : '';
+    if ($token === '' || $sessionToken === '' || !hash_equals($sessionToken, $token)) {
+        unset($_SESSION['csrf_token'], $_SESSION['csrf_token_time']);
         $_SESSION['flash'] = ['type' => 'error', 'msg' => 'Session expired or invalid form token. Please try again.'];
         $fallback = APP_URL . '/dashboard';
         $target = $fallback;

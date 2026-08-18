@@ -8,22 +8,24 @@ requireRoleSelection();
 
 header('Content-Type: application/json; charset=utf-8');
 
-if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'GET') {
+if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
     http_response_code(405);
+    header('Allow: POST');
     echo json_encode(['ok' => false, 'message' => 'Method not allowed.']);
     exit;
 }
+verifyCsrf();
 
 $db = getDB();
 ensureChatSystemSchema($db);
 
 $me = (int)(currentUser()['id'] ?? 0);
-$mode = strtolower(trim((string)($_GET['mode'] ?? 'dm')));
-$rawRecipientId = trim((string)($_GET['recipient_id'] ?? '0'));
+$mode = strtolower(trim((string)($_POST['mode'] ?? 'dm')));
+$rawRecipientId = trim((string)($_POST['recipient_id'] ?? '0'));
 $recipientId = ctype_digit($rawRecipientId) ? (int)$rawRecipientId : 0;
-$rawGroupId = trim((string)($_GET['group_id'] ?? '0'));
+$rawGroupId = trim((string)($_POST['group_id'] ?? '0'));
 $groupId = ctype_digit($rawGroupId) ? (int)$rawGroupId : 0;
-$rawSinceId = trim((string)($_GET['since_id'] ?? '0'));
+$rawSinceId = trim((string)($_POST['since_id'] ?? '0'));
 $sinceId = ctype_digit($rawSinceId) ? (int)$rawSinceId : 0;
 
 if ($me <= 0) {

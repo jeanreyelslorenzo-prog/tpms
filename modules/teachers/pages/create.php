@@ -117,21 +117,21 @@ if ($selectedDistrictId <= 0 && trim((string)($data['district_raw'] ?? '')) !== 
 
             <div class="form-group">
                 <label class="form-label required">Last Name</label>
-                <input type="text" name="last_name" maxlength="60" required class="form-input <?= isset($errors['last_name']) ? 'is-invalid' : '' ?>"
+                <input type="text" name="last_name" maxlength="60" required data-person-name pattern="[\p{L}\p{M} -]+" title="Use letters, spaces, and hyphens only." class="form-input <?= isset($errors['last_name']) ? 'is-invalid' : '' ?>"
                        value="<?= clean($data['last_name'] ?? '') ?>">
                 <?php if (!empty($errors['last_name'])): ?><span class="form-error"><?= clean($errors['last_name']) ?></span><?php endif; ?>
             </div>
 
             <div class="form-group">
                 <label class="form-label required">First Name</label>
-                <input type="text" name="first_name" maxlength="60" required class="form-input <?= isset($errors['first_name']) ? 'is-invalid' : '' ?>"
+                <input type="text" name="first_name" maxlength="60" required data-person-name pattern="[\p{L}\p{M} -]+" title="Use letters, spaces, and hyphens only." class="form-input <?= isset($errors['first_name']) ? 'is-invalid' : '' ?>"
                        value="<?= clean($data['first_name'] ?? '') ?>">
                 <?php if (!empty($errors['first_name'])): ?><span class="form-error"><?= clean($errors['first_name']) ?></span><?php endif; ?>
             </div>
 
             <div class="form-group">
                 <label class="form-label">Middle Name</label>
-                <input type="text" name="middle_name" maxlength="60" class="form-input <?= isset($errors['middle_name']) ? 'is-invalid' : '' ?>" value="<?= clean($data['middle_name'] ?? '') ?>">
+                <input type="text" name="middle_name" maxlength="60" data-person-name pattern="[\p{L}\p{M} -]+" title="Use letters, spaces, and hyphens only." class="form-input <?= isset($errors['middle_name']) ? 'is-invalid' : '' ?>" value="<?= clean($data['middle_name'] ?? '') ?>">
                 <?php if (!empty($errors['middle_name'])): ?><span class="form-error"><?= clean($errors['middle_name']) ?></span><?php endif; ?>
             </div>
 

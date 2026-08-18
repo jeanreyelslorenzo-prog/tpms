@@ -396,6 +396,7 @@ $done     = false;
 if (isset($connectError)) {
     $errors[] = $connectError;
 } elseif ($_SERVER['REQUEST_METHOD'] === 'POST' && !$setupLocked) {
+    verifyCsrf();
     $adminUser  = trim($_POST['admin_user']     ?? 'admin');
     $adminName  = trim($_POST['admin_name']     ?? 'System Administrator');
     $adminPass  = $_POST['admin_password']       ?? '';
@@ -545,6 +546,7 @@ if (isset($connectError)) {
         </div>
 
         <form method="POST" class="login-form" style="gap:14px">
+            <input type="hidden" name="csrf_token" value="<?= csrfToken() ?>">
             <div class="form-group">
                 <label class="form-label">Admin Username</label>
                 <div class="login-field">

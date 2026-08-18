@@ -424,9 +424,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         </form>
 
         <div style="text-align: center; margin-top: 20px; padding-top: 20px; border-top: 1px solid #e2e8f0;">
-            <a href="<?= APP_URL ?>/actions/logout.php" class="btn-logout">
-                <i class="fas fa-sign-out-alt"></i> Switch Account
-            </a>
+            <form method="POST" action="<?= APP_URL ?>/actions/logout.php">
+                <input type="hidden" name="csrf_token" value="<?= csrfToken() ?>">
+                <button type="submit" class="btn-logout">
+                    <i class="fas fa-sign-out-alt"></i> Switch Account
+                </button>
+            </form>
         </div>
         </div>
     </div>
