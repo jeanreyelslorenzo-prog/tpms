@@ -44,7 +44,7 @@ $id = decryptId($token);
 if (!$id) { flash('error', 'Invalid teacher.'); redirect(APP_URL . '/teachers.php'); }
 
 $stmt = $db->prepare(
-    'SELECT t.*, s.school_name, s.school_id_code, d.district_name AS district
+    'SELECT t.*, s.school_name, s.school_id_code, s.district_id AS school_district_id, d.district_name AS district
      FROM teachers t
      LEFT JOIN schools s ON t.school_id = s.id
      LEFT JOIN districts d ON s.district_id = d.id
@@ -53,6 +53,30 @@ $stmt = $db->prepare(
 $stmt->execute([$id]);
 $t = $stmt->fetch();
 if (!$t) { flash('error', 'Teacher not found.'); redirect(APP_URL . '/teachers.php'); }
+if (shouldFilterByDistrict()) {
+    $districtId = (int)getSessionDistrict();
+    $teacherDistrictStmt = $db->prepare(
+        'SELECT 1
+         FROM teachers t_scope
+         LEFT JOIN schools s_scope ON s_scope.id = t_scope.school_id
+         WHERE t_scope.id = ?
+           AND (s_scope.district_id = ? OR EXISTS (
+                SELECT 1
+                FROM teacher_clc_assignments tca_scope
+                INNER JOIN schools clc_scope ON clc_scope.id = tca_scope.clc_school_id
+                WHERE tca_scope.teacher_id = t_scope.id
+                  AND tca_scope.assignment_status = "Active"
+                  AND clc_scope.district_id = ?
+           ))
+         LIMIT 1'
+    );
+    $teacherDistrictStmt->execute([(int)$t['id'], $districtId, $districtId]);
+    if (!$teacherDistrictStmt->fetchColumn()) {
+        logActivity('DENY', 'teachers', (int)$t['id'], 'Blocked teacher profile outside assigned district.');
+        flash('error', 'That teacher is outside your assigned district.');
+        redirect(APP_URL . '/teachers.php');
+    }
+}
 $backSchoolId = $schoolCtx > 0 ? $schoolCtx : (int)($t['school_id'] ?? 0);
 $teachersBackUrl = APP_URL . '/teachers.php' . ($backSchoolId > 0 ? '?school=' . urlencode(encryptId($backSchoolId)) : '');
 $age = calcAge($t['birthdate']);

@@ -13,6 +13,7 @@ if (isLoggedIn()) {
 
 $error = '';
 $msg   = '';
+$rateLimitRetryAfter = 0;
 
 if (isset($_GET['cancel_2fa']) && $_GET['cancel_2fa'] === '1') {
     unset($_SESSION['pending_2fa']);
@@ -26,14 +27,21 @@ $isTwoFactorStep = hasPendingTwoFactorChallenge();
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $usernameForThrottle = trim((string)($_POST['username'] ?? ''));
+    if ($usernameForThrottle === '' && $isTwoFactorStep) {
+        $usernameForThrottle = trim((string)($_SESSION['pending_2fa']['username'] ?? ''));
+    }
 
     $postedCsrf = $_POST['csrf_token'] ?? '';
     if (!hash_equals($_SESSION['csrf_token'] ?? '', $postedCsrf)) {
         $error = 'Session expired. Please try again.';
     }
 
-    if ($error === '' && !canAttemptLogin($usernameForThrottle)) {
-        $error = 'Too many login attempts. Please wait a few minutes before trying again.';
+    if ($error === '') {
+        $rateLimit = loginRateLimitStatus($usernameForThrottle);
+        if (!$rateLimit['allowed']) {
+            $rateLimitRetryAfter = (int)$rateLimit['retry_after'];
+            $error = 'Too many login attempts.';
+        }
     }
 
     $mode = $_POST['mode'] ?? 'password';
@@ -48,7 +56,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $error = 'Enter the 6-digit authenticator code.';
         } elseif (!verifyTwoFactorLoginCode($code)) {
             recordFailedLoginAttempt($usernameForThrottle !== '' ? $usernameForThrottle : (string)($_SESSION['pending_2fa']['username'] ?? ''));
-            $error = 'Invalid or expired authenticator code.';
+            $rateLimit = loginRateLimitStatus($usernameForThrottle);
+            if (!$rateLimit['allowed']) {
+                $rateLimitRetryAfter = (int)$rateLimit['retry_after'];
+                $error = 'Too many login attempts.';
+            } else {
+                $error = 'Invalid or expired authenticator code.';
+            }
         } else {
             clearFailedLoginAttempts((string)($_SESSION['pending_2fa']['username'] ?? $usernameForThrottle));
             
@@ -82,7 +96,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $user = authenticateCredentials($username, $password);
             if ($user === false) {
                 recordFailedLoginAttempt($username);
-                $error = 'Invalid username or password.';
+                $rateLimit = loginRateLimitStatus($username);
+                if (!$rateLimit['allowed']) {
+                    $rateLimitRetryAfter = (int)$rateLimit['retry_after'];
+                    $error = 'Too many login attempts.';
+                } else {
+                    $error = 'Invalid username or password.';
+                }
                 error_log('Failed login attempt for username: ' . $username . ' from IP: ' . ($_SERVER['REMOTE_ADDR'] ?? 'unknown'));
             } else {
                 $is2faEnabled = (int)($user['twofa_enabled'] ?? 0) === 1;
@@ -1182,6 +1202,11 @@ body.login-v2 {
             <?php if ($error): ?>
             <div class="alert alert-error">
                 <i class="fas fa-exclamation-circle"></i> <?= clean($error) ?>
+                <?php if ($rateLimitRetryAfter > 0): ?>
+                <span id="loginRateLimitCountdown" data-seconds="<?= (int)$rateLimitRetryAfter ?>">
+                    Try again in <strong data-countdown-label></strong>.
+                </span>
+                <?php endif; ?>
             </div>
             <?php endif; ?>
             <?php if ($isTwoFactorStep): ?>
@@ -1307,6 +1332,37 @@ body.login-v2 {
 
     // Failsafe: never allow splash to get stuck.
     setTimeout(startBootTimer, 1200);
+})();
+</script>
+<script>
+(function() {
+    const countdown = document.getElementById('loginRateLimitCountdown');
+    if (!countdown) return;
+
+    const label = countdown.querySelector('[data-countdown-label]');
+    const submitButtons = document.querySelectorAll('.login-form button[type="submit"]');
+    let remaining = Math.max(0, Number(countdown.dataset.seconds || 0));
+
+    function formatTime(seconds) {
+        const minutes = Math.floor(seconds / 60);
+        const secs = seconds % 60;
+        return String(minutes).padStart(2, '0') + ':' + String(secs).padStart(2, '0');
+    }
+
+    function render() {
+        if (remaining <= 0) {
+            countdown.textContent = 'You can try again now.';
+            submitButtons.forEach((button) => { button.disabled = false; });
+            return;
+        }
+
+        label.textContent = formatTime(remaining);
+        submitButtons.forEach((button) => { button.disabled = true; });
+        remaining -= 1;
+        window.setTimeout(render, 1000);
+    }
+
+    render();
 })();
 </script>
 </body>

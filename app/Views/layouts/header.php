@@ -27,10 +27,23 @@ $currentUserPhoto = trim((string)($currentUser['profile_photo'] ?? ''));
 $currentUserPhotoUrl = $currentUserPhoto !== '' ? (UPLOAD_URL . rawurlencode($currentUserPhoto)) : '';
 
 $currentUserId = (int)($currentUser['id'] ?? 0);
+$db = getDB();
+$normalizedRole = strtolower(trim((string)$userRole));
+
+// District-scoped roles must always use an administrator-assigned district.
+// This also repairs stale sessions after an administrator changes an assignment.
+if (in_array($normalizedRole, ['psds', 'sdc', 'unit_head'], true)) {
+    $assignedDistricts = getUserDistricts($db, $currentUserId);
+    $sessionDistrict = getSessionDistrict();
+    if (!$assignedDistricts) {
+        clearSessionDistrict();
+    } elseif ($sessionDistrict === null || !in_array($sessionDistrict, $assignedDistricts, true)) {
+        setSessionDistrict($assignedDistricts[0]);
+    }
+}
 
 // Ensure district is set from session (set during login from users.district_id)
 if (getSessionDistrict() === null) {
-    $db = getDB();
     $districtStmt = $db->prepare('SELECT district_id FROM users WHERE id = ? LIMIT 1');
     $districtStmt->execute([$currentUserId]);
     $userDistrict = (int)($districtStmt->fetchColumn() ?? 0);

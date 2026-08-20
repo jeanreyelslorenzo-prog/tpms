@@ -10,6 +10,18 @@ requireDatabaseStructure($db, [
 $errors = [];
 $search = clean(trim((string)($_GET['q'] ?? '')));
 $selectedDistrict = trim((string)($_GET['district'] ?? ''));
+$scopedDistrictId = shouldFilterByDistrict() ? (int)getSessionDistrict() : 0;
+
+if ($scopedDistrictId > 0) {
+    $assignedDistrictStmt = $db->prepare('SELECT district_name FROM districts WHERE id = ? LIMIT 1');
+    $assignedDistrictStmt->execute([$scopedDistrictId]);
+    $assignedDistrictName = trim((string)($assignedDistrictStmt->fetchColumn() ?? ''));
+    if ($selectedDistrict !== '' && strcasecmp($selectedDistrict, $assignedDistrictName) !== 0) {
+        logActivity('DENY', 'districts', $scopedDistrictId, 'Blocked district page request outside assigned district.');
+        flash('error', 'You can only access your assigned district.');
+        redirect(APP_URL . '/districts');
+    }
+}
 
 // Input length validation
 if (strlen($search) > 500 || strlen($selectedDistrict) > 255) {
@@ -37,10 +49,11 @@ $districtRows = $db->prepare(
             ) AS teacher_count
      FROM districts d
      WHERE d.district_name LIKE ?
+       AND (? = 0 OR d.id = ?)
        AND NOT EXISTS (SELECT 1 FROM archived_records ar_active WHERE ar_active.entity_type = "district" AND ar_active.entity_id = d.id AND ar_active.restored_at IS NULL)
      ORDER BY d.district_name'
 );
-$districtRows->execute(['%' . $search . '%']);
+$districtRows->execute(['%' . $search . '%', $scopedDistrictId, $scopedDistrictId]);
 $districts = $districtRows->fetchAll(PDO::FETCH_ASSOC);
 
 $districtCount = count($districts);
@@ -66,10 +79,11 @@ if ($selectedDistrict !== '') {
          FROM schools s
          INNER JOIN districts d ON s.district_id = d.id
          WHERE LOWER(TRIM(d.district_name)) = LOWER(TRIM(?))
+           AND (? = 0 OR d.id = ?)
            AND NOT EXISTS (SELECT 1 FROM archived_records ar_school WHERE ar_school.entity_type="school" AND ar_school.entity_id=s.id AND ar_school.restored_at IS NULL)
          ORDER BY s.school_name'
     );
-    $schoolStmt->execute([$selectedDistrict]);
+    $schoolStmt->execute([$selectedDistrict, $scopedDistrictId, $scopedDistrictId]);
     $selectedDistrictSchools = $schoolStmt->fetchAll(PDO::FETCH_ASSOC);
     foreach ($selectedDistrictSchools as $schoolRow) {
         $selectedDistrictTeacherTotal += (int)($schoolRow['teacher_count'] ?? 0);

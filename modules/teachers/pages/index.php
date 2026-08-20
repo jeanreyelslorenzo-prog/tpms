@@ -445,8 +445,9 @@ arsort($gradeLevelStats);
             </div>
         </form>
 
-        <?php if (canEdit()): ?>
+        <?php if (canExportTeacherData() || canEdit()): ?>
         <div class="filter-actions teachers-action-controls">
+            <?php if (canExportTeacherData()): ?>
             <form id="exportTeachersForm" method="GET" action="<?= APP_URL ?>/actions/export.php" style="display:inline;">
                 <input type="hidden" name="format" id="exportFormat" value="csv">
                 <input type="hidden" name="q" value="<?= htmlspecialchars($search, ENT_QUOTES, 'UTF-8') ?>">
@@ -465,7 +466,9 @@ arsort($gradeLevelStats);
                     <option value="excel">Excel</option>
                 </select>
             </form>
+            <?php endif; ?>
 
+            <?php if (canEdit()): ?>
             <div class="teachers-primary-actions">
                 <a href="<?= APP_URL ?>/requirement_planning.php<?= $filterSchool > 0 ? '?school=' . urlencode(encryptId($filterSchool)) : '' ?>" class="btn btn-ghost teachers-generate-btn">
                     <i class="fas fa-diagram-project"></i> Requirement Planning
@@ -473,13 +476,16 @@ arsort($gradeLevelStats);
                 <button type="button" id="undoUploadBtn" class="btn btn-danger teachers-undo-btn" <?= empty($undoCandidates) ? 'disabled' : '' ?>>
                     <i class="fas fa-rotate-left"></i> Undo Upload
                 </button>
+                <?php if (isAdmin()): ?>
                 <button type="button" class="btn btn-secondary teachers-bulk-btn" onclick="document.getElementById('bulkUploadTeachersModal').style.display='flex'">
                     <i class="fas fa-file-upload"></i> Bulk Upload
                 </button>
+                <?php endif; ?>
                 <a href="<?= APP_URL ?>/add_teacher.php<?= $filterSchool > 0 ? '?school=' . urlencode(encryptId($filterSchool)) : '' ?>" class="btn btn-primary teachers-add-btn">
                     <i class="fas fa-plus"></i> Add Teacher
                 </a>
             </div>
+            <?php endif; ?>
 
         </div>
         <?php endif; ?>
@@ -860,6 +866,7 @@ arsort($gradeLevelStats);
 <!-- ── Pagination ─────────────────────────────────────────── -->
 <?= paginationLinks($pag, APP_URL . '/' . basename($_SERVER['PHP_SELF']) . ($_SERVER['QUERY_STRING'] ? '?' . $_SERVER['QUERY_STRING'] : '')) ?>
 
+<?php if (isAdmin()): ?>
 <!-- Bulk Upload Teachers Modal -->
 <div class="modal-overlay" id="bulkUploadTeachersModal" style="display:none">
     <div class="modal glass-card">
@@ -893,6 +900,7 @@ arsort($gradeLevelStats);
         </form>
     </div>
 </div>
+<?php endif; ?>
 
 <?php if (canEdit()): ?>
 <!-- Transfer School Modal -->

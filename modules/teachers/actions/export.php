@@ -6,8 +6,8 @@ require_once dirname(__DIR__, 3) . '/app/bootstrap.php';
 startSecureSession();
 requireLogin();
 
-if (!canEdit()) {
-    flash('error', 'Access denied. Export is restricted to Admin/HR accounts.');
+if (!canExportTeacherData()) {
+    flash('error', 'Access denied. Teacher export is not available for your role.');
     redirect(APP_URL . '/reports.php');
 }
 
@@ -19,6 +19,19 @@ ensureArchiveSchema($db);
 requireDatabaseStructure($db, [
     'teacher_clc_assignments' => ['teacher_id', 'clc_school_id', 'assignment_status'],
 ]);
+
+$exportRole = strtolower((string)(currentUser()['role'] ?? ''));
+$scopedDistrictId = 0;
+if ($exportRole === 'psds') {
+    $assignedDistricts = getUserDistricts($db, (int)(currentUser()['id'] ?? 0));
+    $sessionDistrict = getSessionDistrict();
+    if ($sessionDistrict === null || !in_array($sessionDistrict, $assignedDistricts, true)) {
+        logActivity('DENY', 'reports', null, 'Blocked PSDS teacher export without a valid assigned district.');
+        flash('error', 'A valid assigned district is required before exporting teacher data.');
+        redirect(APP_URL . '/reports.php');
+    }
+    $scopedDistrictId = $sessionDistrict;
+}
 
 $resolveSchoolFilter = static function(string $raw, PDO $db): array {
     $raw = trim($raw);
@@ -145,6 +158,17 @@ if ($passwordHash === '' || !password_verify($confirmPassword, $passwordHash)) {
 
 $where  = [activeArchiveExclusion('teacher', 't.id')];
 $params = [];
+if ($scopedDistrictId > 0) {
+    $where[] = '(s.district_id = ? OR EXISTS (
+        SELECT 1 FROM teacher_clc_assignments tca_scope
+        INNER JOIN schools sc_scope ON sc_scope.id = tca_scope.clc_school_id
+        WHERE tca_scope.teacher_id = t.id
+          AND tca_scope.assignment_status = \'Active\'
+          AND sc_scope.district_id = ?
+    ))';
+    $params[] = $scopedDistrictId;
+    $params[] = $scopedDistrictId;
+}
 if ($search !== '') {
     $where[] = '(t.employee_number LIKE ? OR t.last_name LIKE ? OR t.first_name LIKE ? OR t.middle_name LIKE ? OR t.position LIKE ? OR t.specialization LIKE ? OR s.school_name LIKE ? OR COALESCE(NULLIF(t.district_raw, ""), d.district_name) LIKE ? OR EXISTS (
         SELECT 1 FROM teacher_clc_assignments tca_search

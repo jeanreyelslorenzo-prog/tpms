@@ -65,7 +65,7 @@ function ensureAuthAttemptTable(PDO $db): void {
     $checked = true;
 }
 
-function canAttemptLogin(?string $username = null): bool {
+function loginRateLimitStatus(?string $username = null): array {
     $windowSec = 900; // 15 minutes
     $maxByIp = 5;     // 5 attempts per IP per 15 minutes (stricter)
     $maxByUser = 3;   // 3 attempts per username per 15 minutes (stricter)
@@ -75,25 +75,43 @@ function canAttemptLogin(?string $username = null): bool {
 
     $ip = getClientIpAddress();
     $normalizedUser = trim((string)$username);
-    $cutoff = date('Y-m-d H:i:s', time() - $windowSec);
-
-    $ipStmt = $db->prepare('SELECT COUNT(*) FROM auth_login_attempts WHERE ip_address = ? AND attempted_at >= ?');
-    $ipStmt->execute([$ip, $cutoff]);
-    $ipFails = (int)$ipStmt->fetchColumn();
+    $ipStmt = $db->prepare(
+        'SELECT COUNT(*) AS failures,
+                GREATEST(0, TIMESTAMPDIFF(SECOND, NOW(), DATE_ADD(MIN(attempted_at), INTERVAL 15 MINUTE))) AS retry_after
+         FROM auth_login_attempts
+         WHERE ip_address = ? AND attempted_at >= (NOW() - INTERVAL 15 MINUTE)'
+    );
+    $ipStmt->execute([$ip]);
+    $ipStatus = $ipStmt->fetch(PDO::FETCH_ASSOC) ?: [];
+    $ipFails = (int)($ipStatus['failures'] ?? 0);
+    $retryAfter = 0;
     if ($ipFails >= $maxByIp) {
-        return false;
+        $retryAfter = max($retryAfter, (int)($ipStatus['retry_after'] ?? $windowSec));
     }
 
     if ($normalizedUser !== '') {
-        $userStmt = $db->prepare('SELECT COUNT(*) FROM auth_login_attempts WHERE username = ? AND attempted_at >= ?');
-        $userStmt->execute([$normalizedUser, $cutoff]);
-        $userFails = (int)$userStmt->fetchColumn();
+        $userStmt = $db->prepare(
+            'SELECT COUNT(*) AS failures,
+                    GREATEST(0, TIMESTAMPDIFF(SECOND, NOW(), DATE_ADD(MIN(attempted_at), INTERVAL 15 MINUTE))) AS retry_after
+             FROM auth_login_attempts
+             WHERE username = ? AND attempted_at >= (NOW() - INTERVAL 15 MINUTE)'
+        );
+        $userStmt->execute([$normalizedUser]);
+        $userStatus = $userStmt->fetch(PDO::FETCH_ASSOC) ?: [];
+        $userFails = (int)($userStatus['failures'] ?? 0);
         if ($userFails >= $maxByUser) {
-            return false;
+            $retryAfter = max($retryAfter, (int)($userStatus['retry_after'] ?? $windowSec));
         }
     }
 
-    return true;
+    return [
+        'allowed' => $retryAfter <= 0,
+        'retry_after' => $retryAfter,
+    ];
+}
+
+function canAttemptLogin(?string $username = null): bool {
+    return (bool)loginRateLimitStatus($username)['allowed'];
 }
 
 function recordFailedLoginAttempt(?string $username = null): void {
@@ -447,6 +465,11 @@ function currentUser(): array {
 
 function canEdit(): bool {
     return in_array($_SESSION['role'] ?? '', ['admin', 'hr'], true);
+}
+
+/** Teacher exports are available to central staff and district-scoped PSDS accounts. */
+function canExportTeacherData(): bool {
+    return in_array(strtolower((string)($_SESSION['role'] ?? '')), ['admin', 'hr', 'psds'], true);
 }
 
 function isAdmin(): bool {
