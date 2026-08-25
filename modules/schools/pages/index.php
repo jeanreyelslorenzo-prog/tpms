@@ -691,6 +691,61 @@ if ($districtFilter !== '') {
         color: #94a3b8;
         background: rgba(30, 41, 59, .18);
     }
+    /* Keep the school list legible instead of squeezing every column into view. */
+    #schoolsListView { overflow: hidden; }
+    #schoolsListView .table-scroll { scrollbar-gutter: stable; }
+    #schoolsListView .schools-table {
+        min-width: 1430px;
+        table-layout: fixed;
+        font-size: .875rem;
+        line-height: 1.45;
+    }
+    #schoolsListView .schools-table th {
+        padding: 13px 12px;
+        color: var(--text);
+        font-size: .75rem;
+        font-weight: 700;
+        letter-spacing: .035em;
+    }
+    #schoolsListView .schools-table td {
+        padding: 15px 12px;
+        color: var(--text);
+        border-bottom-color: var(--glass-border);
+        overflow-wrap: normal;
+        word-break: normal;
+    }
+    #schoolsListView .schools-table tbody tr:nth-child(even) td { background: rgba(255, 255, 255, .025); }
+    #schoolsListView .schools-table tbody tr:hover td { background: rgba(99, 102, 241, .1); }
+    #schoolsListView .col-school-name { width: 220px; }
+    #schoolsListView .col-school-id { width: 110px; }
+    #schoolsListView .col-municipality { width: 135px; }
+    #schoolsListView .col-type { width: 155px; }
+    #schoolsListView .col-district { width: 140px; }
+    #schoolsListView .col-school-head { width: 225px; }
+    #schoolsListView .col-count { width: 85px; }
+    #schoolsListView .col-need { width: 110px; }
+    #schoolsListView .col-actions { width: 165px; }
+    #schoolsListView .school-name-link {
+        color: var(--text);
+        text-decoration: none;
+        font-weight: 700;
+    }
+    #schoolsListView .school-type-label { display: block; color: var(--text); line-height: 1.35; }
+    #schoolsListView .school-type-meta { margin-top: 3px; color: var(--text-muted); line-height: 1.45; }
+    #schoolsListView .schools-table td .badge { white-space: nowrap; }
+    #schoolsListView .school-head-chip { max-width: 100%; }
+    .school-row-actions {
+        display: grid;
+        grid-template-columns: repeat(4, 36px);
+        justify-content: center;
+        gap: 6px;
+    }
+    .school-row-actions .btn {
+        width: 36px;
+        height: 34px;
+        padding: 0;
+        justify-content: center;
+    }
 </style>
 <div class="schools-stats-grid">
     <a href="<?= $buildSchoolsUrl(['type' => null, 'staffing' => null, 'page' => null]) ?>" class="school-stat-link">
@@ -971,7 +1026,7 @@ if ($districtFilter !== '') {
 
 <div class="table-card glass-card" id="schoolsListView">
     <div class="table-scroll">
-        <table class="data-table">
+        <table class="data-table schools-table">
             <thead>
                 <tr>
                     <?php if (canEdit()): ?>
@@ -979,16 +1034,16 @@ if ($districtFilter !== '') {
                         <input type="checkbox" id="schoolsSelectAll" onclick="toggleAllSchoolSelections(this)">
                     </th>
                     <?php endif; ?>
-                    <th>School Name</th>
-                    <th>School ID</th>
-                    <th>Municipality</th>
-                    <th>Type</th>
-                    <th>District</th>
-                    <th>School Head</th>
-                    <th class="text-center">Teachers</th>
-                    <th class="text-center">Learners</th>
-                    <th class="text-center">Teacher Need</th>
-                    <th class="text-center">Actions</th>
+                    <th class="col-school-name">School Name</th>
+                    <th class="col-school-id">School ID</th>
+                    <th class="col-municipality">Municipality</th>
+                    <th class="col-type">Type</th>
+                    <th class="col-district">District</th>
+                    <th class="col-school-head">School Head</th>
+                    <th class="text-center col-count">Teachers</th>
+                    <th class="text-center col-count">Learners</th>
+                    <th class="text-center col-need">Teacher Need</th>
+                    <th class="text-center col-actions">Actions</th>
                 </tr>
             </thead>
             <tbody>
@@ -1007,13 +1062,13 @@ if ($districtFilter !== '') {
                     <input type="checkbox" class="school-select-item" value="<?= (int)$s['id'] ?>">
                 </td>
                 <?php endif; ?>
-                <td><strong><a href="<?= APP_URL ?>/view_school.php?id=<?= urlencode(encryptId((int)$s['id'])) ?>" style="color:inherit;text-decoration:none"><?= clean($s['school_name']) ?></a></strong></td>
+                <td class="col-school-name"><a class="school-name-link" href="<?= APP_URL ?>/view_school.php?id=<?= urlencode(encryptId((int)$s['id'])) ?>"><?= clean($s['school_name']) ?></a></td>
                 <td><?= clean($s['school_id_code'] ?? '—') ?></td>
                 <td><?= clean($s['municipality'] ?? '—') ?></td>
-                <td>
-                    <strong><?= clean($s['institution_classification'] ?: ($s['school_type'] ?? '—')) ?></strong>
+                <td class="col-type">
+                    <strong class="school-type-label"><?= clean($s['institution_classification'] ?: ($s['school_type'] ?? '—')) ?></strong>
                     <?php if (!empty($s['sector']) || !empty($s['school_category'])): ?>
-                    <small class="text-muted" style="display:block;">
+                    <small class="school-type-meta" style="display:block;">
                         <?= clean(SCHOOL_SECTORS[$s['sector']] ?? ucfirst((string)($s['sector'] ?? ''))) ?>
                         <?= !empty($s['school_category']) ? ' · ' . clean(SCHOOL_CATEGORIES[$s['school_category']] ?? ucfirst((string)$s['school_category'])) : '' ?>
                     </small>
@@ -1035,18 +1090,19 @@ if ($districtFilter !== '') {
                         <span><?= clean($schoolHeadName !== '' ? $schoolHeadName : 'No School Head') ?></span>
                     </span>
                 </td>
-                <td class="text-center">
+                <td class="text-center col-count">
                     <a href="<?= APP_URL ?>/teachers.php?school=<?= urlencode(encryptId((int)$s['id'])) ?>" class="badge badge-blue">
                         <?= number_format((int)$s['teacher_count']) ?>
                     </a>
                 </td>
-                <td class="text-center"><?= number_format((int)$s['learner_count']) ?></td>
-                <td class="text-center">
+                <td class="text-center col-count"><?= number_format((int)$s['learner_count']) ?></td>
+                <td class="text-center col-need">
                     <span class="badge <?= $teacherGap > 0 ? 'badge-danger' : 'badge-green' ?>" title="Based on <?= $basis ?> learners per teacher">
                          <?= number_format($teacherGap) ?>
                     </span>
                 </td>
-                <td class="text-center">
+                <td class="text-center col-actions">
+                    <div class="school-row-actions">
                     <a class="btn btn-sm btn-ghost" href="<?= APP_URL ?>/view_school.php?id=<?= urlencode(encryptId((int)$s['id'])) ?>" title="View school profile">
                         <i class="fas fa-eye"></i>
                     </a>
@@ -1070,11 +1126,12 @@ if ($districtFilter !== '') {
                     <a class="btn btn-sm btn-secondary" href="<?= APP_URL ?>/schools.php?edit_school=<?= urlencode(encryptId((int)$s['id'])) ?>" title="Edit school and continue to school setup">
                         <i class="fas fa-edit"></i>
                     </a>
-                    <button class="btn btn-sm btn-danger"
+                    <button type="button" class="btn btn-sm btn-danger" title="Archive school"
                             onclick="confirmDeleteSchool(<?= (int)$s['id'] ?>, '<?= htmlspecialchars(clean($s['school_name']), ENT_QUOTES, 'UTF-8') ?>')">
                         <i class="fas fa-trash"></i>
                     </button>
                     <?php endif; ?>
+                    </div>
                 </td>
             </tr>
             <?php endforeach; ?>
