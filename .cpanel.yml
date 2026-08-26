@@ -1,0 +1,6 @@
+---
+deployment:
+  tasks:
+    - export DEPLOYPATH=/home/depedaur/public_html/tpms/tpms_staging/
+    - /bin/mkdir -p "$DEPLOYPATH"
+    - /usr/bin/rsync -a --exclude='.git/' --exclude='.github/' --exclude='.cpanel.yml' --exclude='.gitignore' --exclude='config/local.php' --exclude='config/live.php' --exclude='database/backups/' --exclude='assets/uploads/photos/' --exclude='deployment/' ./ "$DEPLOYPATH"
