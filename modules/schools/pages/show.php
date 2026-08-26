@@ -140,6 +140,10 @@ $levelStatStmt = $db->prepare(
 $levelStatStmt->execute([$schoolId]);
 $levelStatistics = [];
 foreach ($levelStatStmt->fetchAll(PDO::FETCH_ASSOC) as $levelStat) {
+    $levelStat['class_count'] = calculateSchoolLevelClasses(
+        (string)$levelStat['level_code'],
+        (int)($levelStat['learner_count'] ?? 0)
+    );
     $levelStatistics[(string)$levelStat['level_code']] = $levelStat;
     if (!isset($levelLabels[(string)$levelStat['level_code']])) {
         $levelLabels[(string)$levelStat['level_code']] = ucwords(strtolower(str_replace('_', ' ', (string)$levelStat['level_code'])));

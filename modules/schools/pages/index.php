@@ -1524,21 +1524,21 @@ if ($districtFilter !== '') {
 
             <div class="form-section" style="padding:16px;border:1px solid rgba(148,163,184,.24);border-radius:14px;margin-bottom:16px;">
                 <div class="section-header"><h3><i class="fas fa-chart-column"></i> Learners and Current Classes per Level</h3></div>
+                <p class="text-muted" style="margin:0 0 12px;">Current Classes is calculated automatically from the learner count using the DepEd class-organization parameters.</p>
                 <div class="table-wrap" style="overflow:auto;">
                     <table class="data-table">
-                        <thead><tr><th>Year / Grade Level</th><th style="width:180px;">Learner Count</th><th style="width:180px;">Current Classes</th></tr></thead>
+                        <thead><tr><th>Year / Grade Level</th><th style="width:180px;">Learner Count</th><th style="width:180px;">Current Classes (Automatic)</th></tr></thead>
                         <tbody>
                         <?php foreach ($setupLevelRows as $levelCode => $levelLabel): ?>
                         <?php
                         $savedLearnerValues = is_array($setupFormData['learner_counts'] ?? null) ? $setupFormData['learner_counts'] : [];
-                        $savedClassValues = is_array($setupFormData['class_counts'] ?? null) ? $setupFormData['class_counts'] : [];
                         $levelLearners = $savedLearnerValues[$levelCode] ?? ($setupStatistics[$levelCode]['learner_count'] ?? 0);
-                        $levelClasses = $savedClassValues[$levelCode] ?? ($setupStatistics[$levelCode]['class_count'] ?? 0);
+                        $levelClasses = calculateSchoolLevelClasses($levelCode, max(0, (int)$levelLearners));
                         ?>
                         <tr>
                             <td><strong><?= clean($levelLabel) ?></strong></td>
-                            <td><input type="number" min="0" name="learner_counts[<?= clean($levelCode) ?>]" class="form-input" value="<?= max(0, (int)$levelLearners) ?>"></td>
-                            <td><input type="number" min="0" name="class_counts[<?= clean($levelCode) ?>]" class="form-input" value="<?= max(0, (int)$levelClasses) ?>"></td>
+                            <td><input type="number" min="0" name="learner_counts[<?= clean($levelCode) ?>]" class="form-input" value="<?= max(0, (int)$levelLearners) ?>" data-learner-count data-level-code="<?= clean($levelCode) ?>"></td>
+                            <td><input type="number" min="0" class="form-input" value="<?= max(0, (int)$levelClasses) ?>" data-current-classes readonly aria-readonly="true" tabindex="-1"></td>
                         </tr>
                         <?php endforeach; ?>
                         </tbody>
@@ -1808,12 +1808,56 @@ function closeSchoolSetupModal() {
     window.location.href = <?= json_encode(!empty($_GET['return_school']) && $setupSchool ? APP_URL . '/view_school.php?id=' . urlencode(encryptId((int)$setupSchool['id'])) : APP_URL . '/schools.php', JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
 }
 
+function calculateCurrentClasses(levelCode, learnerCount) {
+    const learners = Math.max(0, Number.parseInt(learnerCount || 0, 10) || 0);
+    if (learners === 0) return 0;
+    const code = String(levelCode || '').toUpperCase();
+    if (code === 'ALS_GRADE_11' || code === 'ALS_GRADE_12') return Math.ceil(learners / 40);
+    if (code.startsWith('ALS_')) return Math.ceil(learners / 15);
+
+    let maximum = 45;
+    let over100Threshold = 23;
+    if (code === 'KINDER') {
+        maximum = 30;
+        over100Threshold = 15;
+    } else {
+        const match = code.match(/^GRADE_(\d{1,2})$/);
+        const grade = match ? Number(match[1]) : 0;
+        if (grade >= 1 && grade <= 3) {
+            maximum = 35;
+            over100Threshold = 18;
+        } else if (grade >= 11 && grade <= 12) {
+            maximum = 40;
+            over100Threshold = 20;
+        }
+    }
+    if (learners <= maximum) return 1;
+    const classes = Math.max(1, Math.floor(learners / maximum));
+    const excess = learners - (classes * maximum);
+    const threshold = learners > 100 ? over100Threshold : 10;
+    return classes + (excess > threshold ? 1 : 0);
+}
+
+function initializeAutomaticCurrentClasses() {
+    document.querySelectorAll('[data-learner-count]').forEach(function (learnerInput) {
+        const row = learnerInput.closest('tr');
+        const classInput = row ? row.querySelector('[data-current-classes]') : null;
+        if (!classInput) return;
+        const refresh = function () {
+            classInput.value = String(calculateCurrentClasses(learnerInput.dataset.levelCode, learnerInput.value));
+        };
+        learnerInput.addEventListener('input', refresh);
+        refresh();
+    });
+}
+
 document.addEventListener('DOMContentLoaded', function () {
     filterAddSchoolDistricts(false);
     toggleAddSchoolPrograms();
     if (shouldOpenAddSchool) openSchoolModal(false);
     if (editSchoolContext) editSchool(editSchoolContext);
     if (document.getElementById('schoolSetupModal')) {
+        initializeAutomaticCurrentClasses();
         toggleSchoolHeadMode();
         initializeQuickTeacherRows();
     }

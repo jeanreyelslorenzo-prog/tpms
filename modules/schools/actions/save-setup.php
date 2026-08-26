@@ -147,12 +147,12 @@ if ($seenEmployeeNumbers) {
 }
 
 $learnerInput = is_array($_POST['learner_counts'] ?? null) ? $_POST['learner_counts'] : [];
-$classInput = is_array($_POST['class_counts'] ?? null) ? $_POST['class_counts'] : [];
 $statistics = [];
 foreach ($validLevels as $levelCode => $label) {
+    $learnerCount = max(0, (int)($learnerInput[$levelCode] ?? 0));
     $statistics[$levelCode] = [
-        'learner_count' => max(0, (int)($learnerInput[$levelCode] ?? 0)),
-        'class_count' => max(0, (int)($classInput[$levelCode] ?? 0)),
+        'learner_count' => $learnerCount,
+        'class_count' => calculateSchoolLevelClasses($levelCode, $learnerCount),
     ];
 }
 

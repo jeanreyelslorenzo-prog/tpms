@@ -289,6 +289,45 @@ function schoolLevelRows(array $offerings): array {
     return $rows;
 }
 
+/** DepEd class-organization parameters for each school level. */
+function schoolClassOrganizationParameters(string $levelCode): array {
+    $levelCode = strtoupper(trim($levelCode));
+    if ($levelCode === 'KINDER') {
+        return ['mode' => 'rounded_excess', 'maximum' => 30, 'over_100_threshold' => 15];
+    }
+    if (preg_match('/^GRADE_([1-9]|1[0-2])$/', $levelCode, $matches)) {
+        $grade = (int)$matches[1];
+        if ($grade <= 3) return ['mode' => 'rounded_excess', 'maximum' => 35, 'over_100_threshold' => 18];
+        if ($grade <= 10) return ['mode' => 'rounded_excess', 'maximum' => 45, 'over_100_threshold' => 23];
+        return ['mode' => 'rounded_excess', 'maximum' => 40, 'over_100_threshold' => 20];
+    }
+    if (in_array($levelCode, ['ALS_GRADE_11', 'ALS_GRADE_12'], true)) {
+        return ['mode' => 'maximum', 'maximum' => 40, 'over_100_threshold' => null];
+    }
+    if (str_starts_with($levelCode, 'ALS_')) {
+        return ['mode' => 'maximum', 'maximum' => 15, 'over_100_threshold' => 8];
+    }
+    return ['mode' => 'maximum', 'maximum' => 35, 'over_100_threshold' => null];
+}
+
+/** Calculate classes from learner count using the DepEd class-organization table. */
+function calculateSchoolLevelClasses(string $levelCode, int $learnerCount): int {
+    $learnerCount = max(0, $learnerCount);
+    if ($learnerCount === 0) return 0;
+
+    $parameters = schoolClassOrganizationParameters($levelCode);
+    $maximum = max(1, (int)$parameters['maximum']);
+    if ($parameters['mode'] === 'maximum') {
+        return (int)ceil($learnerCount / $maximum);
+    }
+    if ($learnerCount <= $maximum) return 1;
+
+    $classes = max(1, intdiv($learnerCount, $maximum));
+    $excess = $learnerCount - ($classes * $maximum);
+    $threshold = $learnerCount > 100 ? (int)$parameters['over_100_threshold'] : 10;
+    return $classes + ($excess > $threshold ? 1 : 0);
+}
+
 /** Return the DepEd school year that contains the supplied date. */
 function defaultSchoolYear(?DateTimeInterface $date = null): string {
     $date ??= new DateTimeImmutable('now');
@@ -1303,6 +1342,7 @@ function computeSchoolTeacherPlanning(PDO $db, int $schoolId, ?array $settings =
     ensureArchiveSchema($db);
     requireDatabaseStructure($db, [
         'teacher_clc_assignments' => ['teacher_id', 'clc_school_id', 'assignment_status'],
+        'school_level_statistics' => ['school_id', 'level_code', 'learner_count', 'class_count'],
     ]);
     $settings = $settings ?? getPlanningSettings($db);
 
@@ -1364,10 +1404,29 @@ function computeSchoolTeacherPlanning(PDO $db, int $schoolId, ?array $settings =
     $teachers = $teacherStmt->fetchAll();
 
     $teacherCount = count($teachers);
-    $totalStudents = max(0, (int)($school['learner_count'] ?? 0));
-    $totalSections = max(0, (int)($school['total_sections'] ?? 0));
+    $levelStatsStmt = $db->prepare(
+        'SELECT level_code, learner_count FROM school_level_statistics WHERE school_id = ? ORDER BY level_code'
+    );
+    $levelStatsStmt->execute([$schoolId]);
+    $levelStatistics = $levelStatsStmt->fetchAll(PDO::FETCH_ASSOC);
+    $automaticLearners = 0;
+    $automaticClasses = 0;
+    foreach ($levelStatistics as &$levelStatistic) {
+        $levelLearners = max(0, (int)($levelStatistic['learner_count'] ?? 0));
+        $levelClasses = calculateSchoolLevelClasses((string)($levelStatistic['level_code'] ?? ''), $levelLearners);
+        $levelStatistic['learner_count'] = $levelLearners;
+        $levelStatistic['class_count'] = $levelClasses;
+        $automaticLearners += $levelLearners;
+        $automaticClasses += $levelClasses;
+    }
+    unset($levelStatistic);
+    $hasLevelStatistics = count($levelStatistics) > 0;
+    $totalStudents = $hasLevelStatistics ? $automaticLearners : max(0, (int)($school['learner_count'] ?? 0));
+    $totalSections = $hasLevelStatistics ? $automaticClasses : max(0, (int)($school['total_sections'] ?? 0));
     $requiredClassesInput = max(0, (int)($school['total_required_classes'] ?? 0));
-    $requiredClasses = $requiredClassesInput > 0 ? $requiredClassesInput : $totalSections;
+    $requiredClasses = $hasLevelStatistics
+        ? $automaticClasses
+        : ($requiredClassesInput > 0 ? $requiredClassesInput : $totalSections);
     $hoursPerClass = max(0.5, (float)($school['hours_per_class_week'] ?? $settings['default_hours_per_class_week']));
     $requiredTeachingHours = $requiredClasses * $hoursPerClass;
 
@@ -1478,6 +1537,7 @@ function computeSchoolTeacherPlanning(PDO $db, int $schoolId, ?array $settings =
         'school' => $school,
         'settings' => $settings,
         'teacher_rows' => $teacherRows,
+        'level_statistics' => $levelStatistics,
         'summary' => [
             'total_students' => $totalStudents,
             'total_teachers' => $teacherCount,
