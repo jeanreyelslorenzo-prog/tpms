@@ -21,3 +21,4 @@ Thumbs.db
 .env
 config.local.php
 config/local.php
+config/live.php
