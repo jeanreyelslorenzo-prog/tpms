@@ -15,6 +15,15 @@ if (!$id || !canEdit()) {
     redirect($returnUrl);
 }
 
+$reasonResult = resolveTeacherArchiveReason(
+    (string)($_POST['archive_reason'] ?? ''),
+    (string)($_POST['archive_reason_other'] ?? '')
+);
+if ($reasonResult['error'] !== '') {
+    flash('error', $reasonResult['error']);
+    redirect($returnUrl);
+}
+
 $confirmPassword = (string)($_POST['confirm_password'] ?? '');
 if ($confirmPassword === '') {
     flash('error', 'Password confirmation is required to archive a teacher.');
@@ -40,8 +49,13 @@ if (!$t) {
     redirect($returnUrl);
 }
 
-archiveRecord($db, 'teacher', $id, 'Archived from the Teachers page');
-logActivity('ARCHIVE', 'teachers', $id, 'Archived teacher: ' . trim($t['first_name'] . ' ' . $t['last_name']));
+archiveRecord($db, 'teacher', $id, $reasonResult['reason']);
+logActivity(
+    'ARCHIVE',
+    'teachers',
+    $id,
+    'Archived teacher: ' . trim($t['first_name'] . ' ' . $t['last_name']) . '. Reason: ' . $reasonResult['reason']
+);
 
-flash('success', 'Teacher moved to Archived Records.');
+flash('success', 'Teacher moved to Archived Records under ' . $reasonResult['reason'] . '.');
 redirect($returnUrl);

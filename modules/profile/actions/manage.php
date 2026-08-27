@@ -9,7 +9,7 @@ verifyCsrf();
 $db = getDB();
 $userId = (int)(currentUser()['id'] ?? 0);
 $action = trim((string)($_POST['action'] ?? ''));
-$allowedSections = ['info', 'password', 'photo', 'security'];
+$allowedSections = ['info', 'photo', 'security'];
 $verifyPassword = static function (string $password) use ($db, $userId): bool {
     $stmt = $db->prepare('SELECT password_hash FROM users WHERE id = ? LIMIT 1');
     $stmt->execute([$userId]);
@@ -25,6 +25,28 @@ if ($action === 'unlock_edit') {
     }
     $_SESSION['profile_edit_unlock_until'] = time() + 300;
     redirect(APP_URL . '/profile.php?edit=' . urlencode($section));
+}
+
+if ($action === 'change_password') {
+    $errors = changeAccountPassword(
+        $db,
+        $userId,
+        (string)($_POST['current_password'] ?? ''),
+        (string)($_POST['new_password'] ?? ''),
+        (string)($_POST['confirm_password'] ?? '')
+    );
+
+    if ($errors) {
+        putFormState('profile.manage', [], $errors);
+        flash('error', 'Password was not changed. Please correct the highlighted fields.');
+        redirect(APP_URL . '/profile.php#change-password');
+    }
+
+    unset($_SESSION['profile_edit_unlock_until'], $_SESSION['csrf_token'], $_SESSION['csrf_token_time']);
+    session_regenerate_id(true);
+    logActivity('UPDATE', 'profile', $userId, 'Changed account password.');
+    flash('success', 'Password changed successfully. Use the new password the next time you sign in.');
+    redirect(APP_URL . '/profile.php#change-password');
 }
 
 if ((int)($_SESSION['profile_edit_unlock_until'] ?? 0) < time()) {
@@ -62,28 +84,6 @@ if ($action === 'update_info') {
     redirect(APP_URL . '/profile.php?edit=info');
 }
 
-if ($action === 'change_password') {
-    $newPassword = (string)($_POST['new_password'] ?? '');
-    $confirm = (string)($_POST['confirm_password'] ?? '');
-    $errors = [];
-    if (strlen($newPassword) < 10 || !preg_match('/[A-Z]/', $newPassword) || !preg_match('/[a-z]/', $newPassword)
-        || !preg_match('/\d/', $newPassword) || !preg_match('/[^A-Za-z0-9]/', $newPassword)) {
-        $errors['new_password'] = 'Use at least 10 characters with upper, lower, number, and special character.';
-    }
-    if ($newPassword !== $confirm) $errors['confirm_password'] = 'Passwords do not match.';
-    if ($errors) {
-        putFormState('profile.manage', [], $errors);
-        flash('error', 'Please correct the password fields.');
-        redirect(APP_URL . '/profile.php?edit=password');
-    }
-    $db->prepare('UPDATE users SET password_hash=?, updated_at=NOW() WHERE id=?')
-        ->execute([password_hash($newPassword, PASSWORD_DEFAULT), $userId]);
-    unset($_SESSION['profile_edit_unlock_until']);
-    logActivity('UPDATE', 'profile', $userId, 'Changed account password.');
-    flash('success', 'Password changed successfully.');
-    redirect(APP_URL . '/profile.php');
-}
-
 if ($action === 'update_photo') {
     $currentStmt = $db->prepare('SELECT profile_photo FROM users WHERE id = ? LIMIT 1');
     $currentStmt->execute([$userId]);
@@ -118,4 +118,3 @@ if ($action === 'update_2fa') {
 
 flash('error', 'Unknown profile action.');
 redirect(APP_URL . '/profile.php');
-

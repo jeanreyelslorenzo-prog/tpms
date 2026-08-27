@@ -32,7 +32,6 @@ without changing bookmarks, forms, JavaScript endpoints, or rewrite rules.
 | `retirement_watch.php` | `modules/retirement/pages/index.php` |
 | `users.php` | `modules/users/pages/index.php` |
 | `logs.php`, `my_activity.php` | `modules/activity/pages/` |
-| `chat.php` | `modules/chat/pages/index.php` |
 | `chatbot.php` | `modules/chatbot/pages/index.php` |
 | `appearance.php` | `modules/appearance/pages/index.php` |
 | `profile.php` | `modules/profile/pages/index.php` |

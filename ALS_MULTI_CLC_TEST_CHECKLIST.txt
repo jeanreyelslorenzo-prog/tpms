@@ -37,7 +37,6 @@ Run migrations 001 through 005 on a current database backup before testing.
    [ ] Invalid or expired CSRF submissions are rejected.
 
 6. Preserved v1.10.0 modules
-   [ ] Team Chat sends, fetches, groups, and shows notifications.
    [ ] My Activity and admin Logs still load and record relevant actions.
    [ ] Existing bookmarks and forms using root *.php/actions/*.php URLs work.
 

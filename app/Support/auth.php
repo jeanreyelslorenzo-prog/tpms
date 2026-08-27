@@ -306,6 +306,61 @@ function buildTotpUri(string $username, string $secret): string {
         . '&digits=6&period=30';
 }
 
+/**
+ * Change an authenticated user's password after validating the current
+ * credential and the shared account password policy.
+ *
+ * @return array<string,string> Field-level validation errors; empty on success.
+ */
+function changeAccountPassword(
+    PDO $db,
+    int $userId,
+    string $currentPassword,
+    string $newPassword,
+    string $confirmation
+): array {
+    $errors = [];
+
+    $stmt = $db->prepare('SELECT password_hash FROM users WHERE id = ? AND is_active = 1 LIMIT 1');
+    $stmt->execute([$userId]);
+    $currentHash = $userId > 0 ? $stmt->fetchColumn() : false;
+
+    if ($currentPassword === '') {
+        $errors['current_password'] = 'Enter your current password.';
+    } elseif (!is_string($currentHash) || $currentHash === '' || !password_verify($currentPassword, $currentHash)) {
+        $errors['current_password'] = 'Current password is incorrect.';
+    }
+
+    if (strlen($newPassword) < 10 || strlen($newPassword) > 72
+        || !preg_match('/[A-Z]/', $newPassword)
+        || !preg_match('/[a-z]/', $newPassword)
+        || !preg_match('/\d/', $newPassword)
+        || !preg_match('/[^A-Za-z0-9]/', $newPassword)) {
+        $errors['new_password'] = 'Use 10 to 72 characters with uppercase, lowercase, number, and special character.';
+    } elseif (!isset($errors['current_password']) && password_verify($newPassword, $currentHash)) {
+        $errors['new_password'] = 'New password must be different from your current password.';
+    }
+
+    if ($newPassword !== $confirmation) {
+        $errors['confirm_password'] = 'Passwords do not match.';
+    }
+
+    if ($errors) return $errors;
+
+    $newHash = password_hash($newPassword, PASSWORD_DEFAULT);
+    if (!is_string($newHash) || $newHash === '') {
+        return ['new_password' => 'Unable to secure the new password. Please try again.'];
+    }
+
+    $update = $db->prepare('UPDATE users SET password_hash = ?, updated_at = NOW() WHERE id = ? AND is_active = 1');
+    $update->execute([$newHash, $userId]);
+    if ($update->rowCount() !== 1) {
+        return ['current_password' => 'Unable to update this account. Please sign in again.'];
+    }
+
+    return [];
+}
+
 function authenticateCredentials(string $username, string $password): array|false {
     $db = getDB();
     ensureTwoFactorColumns($db);

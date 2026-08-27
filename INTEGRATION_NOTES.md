@@ -16,7 +16,7 @@ continue to call `actions/*.php`; those files delegate to the relevant module.
 Internal `app/`, `config/`, `database/`, `includes/`, `modules/`, and `tools/`
 folders remain blocked from direct web access.
 
-The build retains Team Chat and My Activity from v1.10.0 while adding ALS
+The build retains My Activity from v1.10.0 while adding ALS
 Centers, Requirement Planning, and Bulk Upload navigation from the ALS branch.
 
 ## Database boundary

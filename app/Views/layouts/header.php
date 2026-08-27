@@ -144,7 +144,6 @@ if ($isOnboardingPreview) {
 $navLinks = [
     ['href' => 'dashboard',  'icon' => 'tachometer-alt',     'label' => 'Dashboard',   'page' => 'dashboard'],
     ['href' => 'profile',    'icon' => 'user-shield',        'label' => 'My Profile',  'page' => 'profile'],
-    ['href' => 'chat',       'icon' => 'comments',           'label' => 'Team Chat',   'page' => 'chat'],
     ['href' => 'teachers',   'icon' => 'chalkboard-teacher', 'label' => 'Teachers',    'page' => 'teachers'],
     ['href' => 'schools',    'icon' => 'school',             'label' => 'Schools',     'page' => 'schools'],
     ['href' => 'als',        'icon' => 'book-open-reader',   'label' => 'ALS Centers', 'page' => 'als'],
@@ -162,7 +161,7 @@ if (isAdmin()) {
     $navLinks[] = ['href' => 'logs',  'icon' => 'clipboard-list', 'label' => 'Logs',  'page' => 'logs'];
 }
 
-$dockPages = ['dashboard', 'teachers', 'schools', 'chat', 'chatbot'];
+$dockPages = ['dashboard', 'teachers', 'schools', 'chatbot'];
 $dockLinks = [];
 foreach ($dockPages as $dockPage) {
     foreach ($navLinks as $link) {
@@ -436,181 +435,6 @@ $isAppWindow = isset($_GET['app_window']) && $_GET['app_window'] === '1';
     <span class="ambient-orb ambient-orb-9"></span>
     <span class="ambient-orb ambient-orb-10"></span>
 </div>
-
-<script>
-(function globalMessageNotifier() {
-    var currentPage = <?= json_encode($currentPage) ?>;
-    var notificationsUrl = <?= json_encode(APP_URL . '/actions/message_notifications.php') ?>;
-    var chatUrl = <?= json_encode(APP_URL . '/chat.php') ?>;
-    var pollIntervalMs = 4000;
-    var isPolling = false;
-
-    function injectNotificationStyles() {
-        if (document.getElementById('tpmsGlobalNotifierStyles')) {
-            return;
-        }
-
-        var style = document.createElement('style');
-        style.id = 'tpmsGlobalNotifierStyles';
-        style.textContent = ''
-            + '.tpms-msg-toast.swal2-popup{'
-            + 'border:1px solid rgba(56,189,248,.35);'
-            + 'border-radius:16px;'
-            + 'backdrop-filter:blur(14px) saturate(125%);'
-            + '-webkit-backdrop-filter:blur(14px) saturate(125%);'
-            + 'background:linear-gradient(150deg, rgba(8,47,73,.86), rgba(15,23,42,.88));'
-            + 'box-shadow:0 14px 36px rgba(2,6,23,.38), inset 0 1px 0 rgba(255,255,255,.14);'
-            + 'color:#e2e8f0;'
-            + 'padding:12px 14px 12px 12px;'
-            + '}'
-            + '.tpms-msg-toast .swal2-title{font-size:.95rem;font-weight:800;letter-spacing:.01em;color:#f8fafc;margin:0 0 4px;}'
-            + '.tpms-msg-toast .swal2-html-container{margin:0;font-size:.8rem;line-height:1.45;color:#cbd5e1;}'
-            + '.tpms-msg-toast .swal2-actions{margin-top:10px;gap:8px;}'
-            + '.tpms-msg-toast .swal2-confirm{background:linear-gradient(135deg,#0ea5e9,#22c55e) !important;border:0 !important;box-shadow:0 8px 20px rgba(14,165,233,.28);font-weight:700;}'
-            + '.tpms-msg-toast .swal2-cancel{background:rgba(148,163,184,.16) !important;color:#e2e8f0 !important;border:1px solid rgba(148,163,184,.28) !important;font-weight:700;}'
-            + '.tpms-msg-toast .swal2-timer-progress-bar{background:linear-gradient(90deg, rgba(56,189,248,.9), rgba(34,197,94,.9));}'
-            + '.tpms-chat-badge{margin-left:8px;min-width:20px;height:20px;padding:0 6px;border-radius:999px;background:linear-gradient(135deg,#ef4444,#f97316);color:#fff;font-size:.68rem;font-weight:800;display:inline-flex;align-items:center;justify-content:center;line-height:1;border:1px solid rgba(255,255,255,.35);box-shadow:0 0 0 0 rgba(239,68,68,.5);animation:tpmsChatPulse 1.8s infinite;}'
-            + '@keyframes tpmsChatPulse{0%{box-shadow:0 0 0 0 rgba(239,68,68,.55)}70%{box-shadow:0 0 0 9px rgba(239,68,68,0)}100%{box-shadow:0 0 0 0 rgba(239,68,68,0)}}';
-        document.head.appendChild(style);
-    }
-
-    function updateChatBadges(totalCount) {
-        var anchors = document.querySelectorAll('a[href$="/chat"], a[href$="/chat.php"]');
-        anchors.forEach(function(anchor) {
-            var badge = anchor.querySelector('.tpms-chat-badge');
-            if (totalCount > 0) {
-                if (!badge) {
-                    badge = document.createElement('span');
-                    badge.className = 'tpms-chat-badge';
-                    anchor.appendChild(badge);
-                }
-                badge.textContent = totalCount > 99 ? '99+' : String(totalCount);
-            } else if (badge) {
-                badge.remove();
-            }
-        });
-    }
-
-    function canShowAlert() {
-        return typeof Swal !== 'undefined' && currentPage !== 'chat';
-    }
-
-    function showMessageToast(payload) {
-        if (!canShowAlert()) {
-            return;
-        }
-
-        var directCount = Number(payload.unread_direct || 0);
-        var groupCount = Number(payload.group_activity || 0);
-        var totalCount = Number(payload.total_unread || 0);
-        if (totalCount <= 0) {
-            return;
-        }
-
-        var lines = [];
-        if (directCount > 0) {
-            lines.push(directCount + ' unread direct message' + (directCount !== 1 ? 's' : ''));
-        }
-        if (groupCount > 0) {
-            lines.push(groupCount + ' active group chat' + (groupCount !== 1 ? 's' : ''));
-        }
-
-        Swal.fire({
-            toast: true,
-            position: 'bottom-end',
-            icon: 'info',
-            title: 'New Messages',
-            html: lines.join('<br>'),
-            customClass: {
-                popup: 'tpms-msg-toast'
-            },
-            showConfirmButton: true,
-            confirmButtonText: 'Open Chat',
-            showCancelButton: true,
-            cancelButtonText: 'Dismiss',
-            timer: 10000,
-            timerProgressBar: true,
-            backdrop: false,
-            allowOutsideClick: true,
-            allowEscapeKey: true,
-            returnFocus: false
-        }).then(function(result) {
-            if (result.isConfirmed) {
-                window.location.href = chatUrl;
-            }
-        });
-    }
-
-    function handlePayload(payload) {
-        if (!payload || payload.ok !== true) {
-            return;
-        }
-
-        var total = Number(payload.total_unread || 0);
-        var signature = String(payload.signature || '');
-        var storageKey = 'tpms-global-message-alert-signature';
-        var seenSignature = window.sessionStorage.getItem(storageKey) || '';
-
-        updateChatBadges(total);
-
-        var shouldNotify = total > 0 && signature !== '' && signature !== seenSignature;
-        if (shouldNotify) {
-            showMessageToast(payload);
-            window.sessionStorage.setItem(storageKey, signature);
-        }
-    }
-
-    function pollNow() {
-        if (isPolling) {
-            return;
-        }
-        isPolling = true;
-
-        fetch(notificationsUrl + '?_=' + Date.now(), {
-            method: 'GET',
-            credentials: 'same-origin',
-            cache: 'no-store',
-            headers: {
-                'Accept': 'application/json',
-                'X-Requested-With': 'XMLHttpRequest'
-            }
-        }).then(function(response) {
-            if (!response.ok) {
-                throw new Error('Notification poll failed with status ' + response.status);
-            }
-            return response.json();
-        }).then(function(data) {
-            handlePayload(data);
-        }).catch(function() {
-            // Silent fail to avoid interrupting user workflow.
-        }).finally(function() {
-            isPolling = false;
-        });
-    }
-
-    function startPolling() {
-        injectNotificationStyles();
-        pollNow();
-        window.setInterval(function() {
-            if (document.visibilityState === 'visible') {
-                pollNow();
-            }
-        }, pollIntervalMs);
-    }
-
-    document.addEventListener('visibilitychange', function() {
-        if (document.visibilityState === 'visible') {
-            pollNow();
-        }
-    });
-
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', startPolling, { once: true });
-    } else {
-        startPolling();
-    }
-})();
-</script>
 
 <?php if (!$isAppWindow): ?>
 <!-- Sidebar overlay (mobile) -->

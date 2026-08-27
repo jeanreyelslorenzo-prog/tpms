@@ -447,6 +447,8 @@ $planningUrl = APP_URL . '/requirement_planning.php?school=' . urlencode(encrypt
     <input type="hidden" name="csrf_token" value="<?= csrfToken() ?>">
     <input type="hidden" name="id" id="schoolProfileArchiveTeacherId">
     <input type="hidden" name="confirm_password" id="schoolProfileArchivePassword">
+    <input type="hidden" name="archive_reason" id="schoolProfileArchiveReasonValue">
+    <input type="hidden" name="archive_reason_other" id="schoolProfileArchiveReasonOtherValue">
     <input type="hidden" name="return_school" value="<?= $schoolId ?>">
 </form>
 
@@ -454,7 +456,23 @@ $planningUrl = APP_URL . '/requirement_planning.php?school=' . urlencode(encrypt
     <div class="modal glass-card">
         <div class="modal-icon danger"><i class="fas fa-exclamation-triangle"></i></div>
         <h3 class="modal-title">Archive Teacher</h3>
-        <p class="modal-body">Move <strong id="schoolProfileArchiveTeacherName"></strong> to Archived Records? The teacher and linked data will be preserved.</p>
+        <div class="modal-body">
+            <p>Move <strong id="schoolProfileArchiveTeacherName"></strong> to Archived Records? The teacher and linked data will be preserved.</p>
+            <div class="form-group" style="margin-top:14px;text-align:left">
+                <label class="form-label required" for="schoolProfileArchiveReason">Reason for Archiving</label>
+                <select id="schoolProfileArchiveReason" class="form-select" required>
+                    <option value="">Select a reason...</option>
+                    <option value="retired">Retired</option>
+                    <option value="resigned">Resigned</option>
+                    <option value="other">Other (please specify)</option>
+                </select>
+            </div>
+            <div class="form-group" id="schoolProfileArchiveOtherGroup" style="display:none;margin-top:12px;text-align:left">
+                <label class="form-label required" for="schoolProfileArchiveReasonOther">Please Specify the Other Reason</label>
+                <textarea id="schoolProfileArchiveReasonOther" class="form-input" rows="3" maxlength="200" placeholder="Briefly explain why this teacher is being archived"></textarea>
+                <small class="form-help">Maximum 200 characters.</small>
+            </div>
+        </div>
         <div class="modal-actions">
             <button type="button" class="btn btn-ghost" onclick="document.getElementById('schoolProfileArchiveModal').style.display='none'">Cancel</button>
             <button type="button" class="btn btn-danger" onclick="submitSchoolProfileArchive()"><i class="fas fa-box-archive"></i> Archive</button>
@@ -511,13 +529,41 @@ $planningUrl = APP_URL . '/requirement_planning.php?school=' . urlencode(encrypt
         document.getElementById('schoolProfileArchiveTeacherId').value = teacherId;
         document.getElementById('schoolProfileArchiveTeacherName').textContent = teacherName;
         document.getElementById('schoolProfileArchivePassword').value = '';
+        document.getElementById('schoolProfileArchiveReason').value = '';
+        document.getElementById('schoolProfileArchiveReasonOther').value = '';
+        toggleSchoolProfileArchiveOtherReason();
         document.getElementById('schoolProfileArchiveModal').style.display = 'flex';
     };
+
+    function toggleSchoolProfileArchiveOtherReason() {
+        const reasonSelect = document.getElementById('schoolProfileArchiveReason');
+        const otherGroup = document.getElementById('schoolProfileArchiveOtherGroup');
+        const otherInput = document.getElementById('schoolProfileArchiveReasonOther');
+        if (!reasonSelect || !otherGroup || !otherInput) return;
+        const showOther = reasonSelect.value === 'other';
+        otherGroup.style.display = showOther ? 'flex' : 'none';
+        otherInput.required = showOther;
+        if (showOther) {
+            window.setTimeout(function () { otherInput.focus(); }, 0);
+        } else {
+            otherInput.value = '';
+        }
+    }
+
+    document.getElementById('schoolProfileArchiveReason')?.addEventListener('change', toggleSchoolProfileArchiveOtherReason);
 
     window.submitSchoolProfileArchive = async function () {
         const form = document.getElementById('schoolProfileArchiveForm');
         const passwordInput = document.getElementById('schoolProfileArchivePassword');
-        if (!form || !passwordInput) return;
+        const reasonSelect = document.getElementById('schoolProfileArchiveReason');
+        const otherInput = document.getElementById('schoolProfileArchiveReasonOther');
+        const reasonValue = document.getElementById('schoolProfileArchiveReasonValue');
+        const otherValue = document.getElementById('schoolProfileArchiveReasonOtherValue');
+        if (!form || !passwordInput || !reasonSelect || !otherInput || !reasonValue || !otherValue) return;
+        if (!reasonSelect.reportValidity()) return;
+        if (reasonSelect.value === 'other' && !otherInput.reportValidity()) return;
+        reasonValue.value = reasonSelect.value;
+        otherValue.value = reasonSelect.value === 'other' ? otherInput.value.trim() : '';
         let password = '';
         if (typeof Swal !== 'undefined') {
             const result = await Swal.fire({

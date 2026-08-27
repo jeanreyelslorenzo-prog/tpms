@@ -25,7 +25,7 @@ if ($selectedDistrictId !== null) {
     $selectedDistrictName = trim((string)($selectedStmt->fetchColumn() ?? ''));
 }
 
-$allowedEditSections = ['info', 'password', 'photo', 'security'];
+$allowedEditSections = ['info', 'photo', 'security'];
 $requestedEdit = trim((string)($_GET['edit'] ?? ''));
 $activeEdit = in_array($requestedEdit, $allowedEditSections, true) ? $requestedEdit : '';
 
@@ -383,6 +383,59 @@ $profilePhotoUrl = !empty($account['profile_photo'])
     font-size: .8rem;
     color: var(--text-sub);
 }
+.profile-password-intro {
+    margin: 0 0 14px;
+    color: var(--text-muted);
+    font-size: .86rem;
+    line-height: 1.5;
+}
+.profile-password-policy {
+    display: grid;
+    gap: 8px;
+    margin: 2px 0 0;
+    padding: 12px 14px;
+    border: 1px solid var(--glass-border);
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--glass-bg) 74%, transparent);
+    color: var(--text-muted);
+    font-size: .8rem;
+    line-height: 1.4;
+}
+.profile-password-policy strong {
+    color: var(--text);
+}
+.profile-password-rules {
+    display: grid;
+    gap: 7px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+.profile-password-rule {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    color: var(--text-muted);
+    transition: color .18s ease;
+}
+.profile-password-rule i {
+    width: 14px;
+    margin-top: 2px;
+    color: var(--text-sub);
+    text-align: center;
+    transition: color .18s ease, transform .18s ease;
+}
+.profile-password-rule.is-met {
+    color: color-mix(in srgb, #22c55e 72%, var(--text));
+}
+.profile-password-rule.is-met i {
+    color: color-mix(in srgb, #22c55e 72%, var(--text));
+    transform: scale(1.06);
+}
+.profile-password-rule.is-met .profile-password-rule-text {
+    text-decoration: line-through;
+    text-decoration-thickness: 1.5px;
+}
 .swal2-popup.tpms-swal {
     border-radius: 16px !important;
     border: 1px solid var(--glass-border) !important;
@@ -592,7 +645,7 @@ $profilePhotoUrl = !empty($account['profile_photo'])
             <h3 class="card-title"><i class="fas fa-user"></i> Account Information</h3>
         </div>
         <?php if ($activeEdit === 'info' && $profileEditUnlocked): ?>
-        <form method="POST" action="<?= APP_URL ?>/actions/manage_profile.php" class="form-grid" style="grid-template-columns:1fr;gap:12px;">
+        <form method="POST" action="<?= APP_URL ?>/actions/manage_profile.php" class="form-grid" id="profilePasswordForm" style="grid-template-columns:1fr;gap:12px;">
             <input type="hidden" name="csrf_token" value="<?= csrfToken() ?>">
             <input type="hidden" name="action" value="update_info">
 
@@ -645,43 +698,88 @@ $profilePhotoUrl = !empty($account['profile_photo'])
         <?php endif; ?>
     </div>
 
-    <div class="chart-card glass-card profile-password-card profile-gradient-card">
+    <div class="chart-card glass-card profile-password-card profile-gradient-card" id="change-password">
         <div class="card-header">
             <h3 class="card-title"><i class="fas fa-key"></i> Change Password</h3>
         </div>
-        <?php if ($activeEdit === 'password' && $profileEditUnlocked): ?>
         <form method="POST" action="<?= APP_URL ?>/actions/manage_profile.php" class="form-grid" style="grid-template-columns:1fr;gap:12px;">
             <input type="hidden" name="csrf_token" value="<?= csrfToken() ?>">
             <input type="hidden" name="action" value="change_password">
 
+            <p class="profile-password-intro">Update the password for this signed-in account. Your current password is required to protect the account.</p>
+
             <div class="form-group">
-                <label class="form-label required">New Password</label>
-                <input type="password" name="new_password" class="form-input" autocomplete="new-password" required>
-                <?php if (!empty($errors['new_password'])): ?><span class="form-error"><?= clean($errors['new_password']) ?></span><?php endif; ?>
-                <small class="text-muted">Minimum 10 characters including uppercase, lowercase, number, and symbol.</small>
+                <label class="form-label required" for="profileCurrentPassword">Current Password</label>
+                <div class="input-with-toggle">
+                    <input type="password" name="current_password" id="profileCurrentPassword" class="form-input" autocomplete="current-password" required>
+                    <button type="button" class="toggle-password" data-target="profileCurrentPassword" title="Show or hide current password" aria-label="Show or hide current password">
+                        <i class="fas fa-eye" aria-hidden="true"></i>
+                    </button>
+                </div>
+                <?php if (!empty($errors['current_password'])): ?><span class="form-error"><?= clean($errors['current_password']) ?></span><?php endif; ?>
             </div>
 
             <div class="form-group">
-                <label class="form-label required">Confirm New Password</label>
-                <input type="password" name="confirm_password" class="form-input" autocomplete="new-password" required>
+                <label class="form-label required" for="profileNewPassword">New Password</label>
+                <div class="input-with-toggle">
+                    <input type="password" name="new_password" id="profileNewPassword" class="form-input" autocomplete="new-password" minlength="10" maxlength="72" required>
+                    <button type="button" class="toggle-password" data-target="profileNewPassword" title="Show or hide new password" aria-label="Show or hide new password">
+                        <i class="fas fa-eye" aria-hidden="true"></i>
+                    </button>
+                </div>
+                <?php if (!empty($errors['new_password'])): ?><span class="form-error"><?= clean($errors['new_password']) ?></span><?php endif; ?>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label required" for="profileConfirmPassword">Confirm New Password</label>
+                <div class="input-with-toggle">
+                    <input type="password" name="confirm_password" id="profileConfirmPassword" class="form-input" autocomplete="new-password" minlength="10" maxlength="72" required>
+                    <button type="button" class="toggle-password" data-target="profileConfirmPassword" title="Show or hide password confirmation" aria-label="Show or hide password confirmation">
+                        <i class="fas fa-eye" aria-hidden="true"></i>
+                    </button>
+                </div>
                 <?php if (!empty($errors['confirm_password'])): ?><span class="form-error"><?= clean($errors['confirm_password']) ?></span><?php endif; ?>
             </div>
 
+            <div class="profile-password-policy" id="profilePasswordPolicy" aria-live="polite">
+                <strong>Password requirements</strong>
+                <ul class="profile-password-rules">
+                    <li class="profile-password-rule" data-password-rule="length">
+                        <i class="far fa-circle" aria-hidden="true"></i>
+                        <span class="profile-password-rule-text">Contains 10 to 72 characters</span>
+                    </li>
+                    <li class="profile-password-rule" data-password-rule="uppercase">
+                        <i class="far fa-circle" aria-hidden="true"></i>
+                        <span class="profile-password-rule-text">Contains an uppercase letter</span>
+                    </li>
+                    <li class="profile-password-rule" data-password-rule="lowercase">
+                        <i class="far fa-circle" aria-hidden="true"></i>
+                        <span class="profile-password-rule-text">Contains a lowercase letter</span>
+                    </li>
+                    <li class="profile-password-rule" data-password-rule="number">
+                        <i class="far fa-circle" aria-hidden="true"></i>
+                        <span class="profile-password-rule-text">Contains a number</span>
+                    </li>
+                    <li class="profile-password-rule" data-password-rule="special">
+                        <i class="far fa-circle" aria-hidden="true"></i>
+                        <span class="profile-password-rule-text">Contains a special character</span>
+                    </li>
+                    <li class="profile-password-rule" data-password-rule="different">
+                        <i class="far fa-circle" aria-hidden="true"></i>
+                        <span class="profile-password-rule-text">Different from the current password</span>
+                    </li>
+                    <li class="profile-password-rule" data-password-rule="matches">
+                        <i class="far fa-circle" aria-hidden="true"></i>
+                        <span class="profile-password-rule-text">Matches the confirmation password</span>
+                    </li>
+                </ul>
+            </div>
+
             <div class="modal-actions" style="justify-content:flex-end;">
-                <a href="<?= APP_URL ?>/profile.php" class="btn btn-ghost">Close Edit</a>
-                <button type="submit" class="btn btn-primary"><i class="fas fa-lock"></i> Update Password</button>
+                <button type="reset" class="btn btn-ghost">Clear</button>
+                <button type="submit" class="btn btn-primary"><i class="fas fa-lock"></i> Change Password</button>
             </div>
         </form>
-        <?php else: ?>
-        <div class="profile-view-list">
-            <div class="profile-view-row"><strong>Password</strong><span>Hidden for security</span></div>
-            <div class="profile-view-row"><strong>Policy</strong><span>At least 10 chars with uppercase, lowercase, number, and symbol.</span></div>
-        </div>
-        <div class="modal-actions" style="justify-content:flex-end;margin-top:12px;">
-            <a href="<?= APP_URL ?>/profile.php?edit=password" class="btn btn-primary profile-edit-trigger" data-edit-section="password"><i class="fas fa-pen"></i> Edit Password</a>
-        </div>
-        <div class="profile-lock-note">Editing requires password confirmation and resets the current unlock.</div>
-        <?php endif; ?>
     </div>
 
     <div class="chart-card glass-card profile-photo-card profile-gradient-card">
@@ -844,6 +942,48 @@ $profilePhotoUrl = !empty($account['profile_photo'])
     const isUnlocked = <?= $profileEditUnlocked ? 'true' : 'false' ?>;
     const pendingEditSection = <?= json_encode(($activeEdit !== '' && !$profileEditUnlocked) ? $activeEdit : '') ?>;
     const unlockError = <?= json_encode($unlockError) ?>;
+
+    const currentPasswordInput = document.getElementById('profileCurrentPassword');
+    const newPasswordInput = document.getElementById('profileNewPassword');
+    const confirmPasswordInput = document.getElementById('profileConfirmPassword');
+    const passwordForm = document.getElementById('profilePasswordForm');
+    const passwordRuleItems = document.querySelectorAll('[data-password-rule]');
+
+    function updatePasswordRequirements() {
+        if (!currentPasswordInput || !newPasswordInput || !confirmPasswordInput) return;
+
+        const currentPassword = currentPasswordInput.value;
+        const newPassword = newPasswordInput.value;
+        const confirmation = confirmPasswordInput.value;
+        const states = {
+            length: newPassword.length >= 10 && newPassword.length <= 72,
+            uppercase: /[A-Z]/.test(newPassword),
+            lowercase: /[a-z]/.test(newPassword),
+            number: /\d/.test(newPassword),
+            special: /[^A-Za-z0-9]/.test(newPassword),
+            different: currentPassword !== '' && newPassword !== '' && newPassword !== currentPassword,
+            matches: confirmation !== '' && newPassword !== '' && confirmation === newPassword
+        };
+
+        passwordRuleItems.forEach(function(item) {
+            const rule = item.getAttribute('data-password-rule') || '';
+            const isMet = Boolean(states[rule]);
+            const icon = item.querySelector('i');
+            const ruleText = item.querySelector('.profile-password-rule-text')?.textContent || '';
+
+            item.classList.toggle('is-met', isMet);
+            item.setAttribute('aria-label', (isMet ? 'Met: ' : 'Not met: ') + ruleText);
+            if (icon) icon.className = isMet ? 'fas fa-check-circle' : 'far fa-circle';
+        });
+    }
+
+    [currentPasswordInput, newPasswordInput, confirmPasswordInput].forEach(function(input) {
+        input?.addEventListener('input', updatePasswordRequirements);
+    });
+    passwordForm?.addEventListener('reset', function() {
+        window.setTimeout(updatePasswordRequirements, 0);
+    });
+    updatePasswordRequirements();
 
     function submitUnlock(section, password) {
         if (!unlockForm || !unlockSection || !unlockPassword) return;

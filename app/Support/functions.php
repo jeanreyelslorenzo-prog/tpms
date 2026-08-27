@@ -50,6 +50,37 @@ function archiveRecord(PDO $db, string $entityType, int $entityId, string $reaso
     $stmt->execute([$entityType, $entityId, $reason !== '' ? $reason : null, (int)(currentUser()['id'] ?? 0) ?: null]);
 }
 
+/**
+ * Normalize the controlled reason saved when a teacher is archived.
+ *
+ * @return array{category:string,reason:string,error:string}
+ */
+function resolveTeacherArchiveReason(string $category, string $otherReason = ''): array {
+    $category = strtolower(trim($category));
+    $labels = [
+        'retired' => 'Retired',
+        'resigned' => 'Resigned',
+    ];
+
+    if (isset($labels[$category])) {
+        return ['category' => $category, 'reason' => $labels[$category], 'error' => ''];
+    }
+
+    if ($category !== 'other') {
+        return ['category' => '', 'reason' => '', 'error' => 'Select a reason for archiving this teacher.'];
+    }
+
+    $otherReason = trim((string)preg_replace('/\s+/u', ' ', $otherReason));
+    if ($otherReason === '') {
+        return ['category' => 'other', 'reason' => '', 'error' => 'Enter the other reason for archiving this teacher.'];
+    }
+    if (mb_strlen($otherReason) > 200) {
+        return ['category' => 'other', 'reason' => '', 'error' => 'Other archive reason must not exceed 200 characters.'];
+    }
+
+    return ['category' => 'other', 'reason' => 'Other: ' . $otherReason, 'error' => ''];
+}
+
 /** SQL predicate for excluding active archive entries from an entity query. */
 function activeArchiveExclusion(string $entityType, string $idExpression): string {
     $allowed = ['teacher', 'school', 'district', 'user'];
@@ -1870,62 +1901,4 @@ function requireRoleSelection(): void {
             redirect(APP_URL . '/select-role');
         }
     }
-}
-
-/**
- * Ensure chat system tables exist.
- * Supports direct messages and custom group chats retained from v1.10.0.
- */
-function ensureChatSystemSchema(PDO $db): void {
-    static $ensured = false;
-    if ($ensured) {
-        return;
-    }
-
-    $db->exec("CREATE TABLE IF NOT EXISTS chat_groups (
-        id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-        group_name VARCHAR(120) NOT NULL,
-        created_by INT NOT NULL,
-        is_archived TINYINT(1) NOT NULL DEFAULT 0,
-        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
-        INDEX idx_chat_groups_created_by (created_by),
-        INDEX idx_chat_groups_active (is_archived, updated_at)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
-
-    $db->exec("CREATE TABLE IF NOT EXISTS chat_group_members (
-        id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-        group_id BIGINT UNSIGNED NOT NULL,
-        user_id INT NOT NULL,
-        member_role VARCHAR(16) NOT NULL DEFAULT 'member',
-        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE KEY uniq_group_user (group_id, user_id),
-        INDEX idx_group_member_user (user_id),
-        INDEX idx_group_member_group (group_id)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
-
-    $db->exec("CREATE TABLE IF NOT EXISTS chat_messages (
-        id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-        sender_id INT NOT NULL,
-        recipient_id INT NULL,
-        group_id BIGINT UNSIGNED NULL,
-        message_text TEXT NOT NULL,
-        is_read TINYINT(1) NOT NULL DEFAULT 0,
-        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
-        INDEX idx_chat_group_created (group_id, created_at),
-        INDEX idx_chat_recipient_created (recipient_id, created_at),
-        INDEX idx_chat_sender_created (sender_id, created_at),
-        INDEX idx_chat_direct_lookup (sender_id, recipient_id, id)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
-
-    if (!tpmsColumnExists($db, 'chat_messages', 'group_id')) {
-        $db->exec('ALTER TABLE chat_messages ADD COLUMN group_id BIGINT UNSIGNED NULL AFTER recipient_id');
-    }
-
-    if (!tpmsIndexExists($db, 'chat_messages', 'idx_chat_group_created')) {
-        $db->exec('ALTER TABLE chat_messages ADD INDEX idx_chat_group_created (group_id, created_at)');
-    }
-
-    $ensured = true;
 }

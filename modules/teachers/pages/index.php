@@ -937,16 +937,32 @@ arsort($gradeLevelStats);
     <div class="modal glass-card">
         <div class="modal-icon danger"><i class="fas fa-exclamation-triangle"></i></div>
         <h3 class="modal-title">Archive Teacher</h3>
-        <p class="modal-body">Move <strong id="deleteName"></strong> to Archived Records? The teacher and all linked data will be preserved.</p>
-        <div class="modal-actions">
-            <button onclick="document.getElementById('deleteModal').style.display='none'" class="btn btn-ghost">Cancel</button>
-            <form method="POST" action="<?= APP_URL ?>/actions/delete_teacher.php" id="deleteForm">
-                <input type="hidden" name="csrf_token" value="<?= csrfToken() ?>">
-                <input type="hidden" name="id" id="deleteId">
-                <input type="hidden" name="confirm_password" id="deleteConfirmPassword">
+        <form method="POST" action="<?= APP_URL ?>/actions/delete_teacher.php" id="deleteForm">
+            <input type="hidden" name="csrf_token" value="<?= csrfToken() ?>">
+            <input type="hidden" name="id" id="deleteId">
+            <input type="hidden" name="confirm_password" id="deleteConfirmPassword">
+            <div class="modal-body">
+                <p>Move <strong id="deleteName"></strong> to Archived Records? The teacher and all linked data will be preserved.</p>
+                <div class="form-group" style="margin-top:14px;text-align:left">
+                    <label class="form-label required" for="deleteArchiveReason">Reason for Archiving</label>
+                    <select name="archive_reason" id="deleteArchiveReason" class="form-select" required>
+                        <option value="">Select a reason...</option>
+                        <option value="retired">Retired</option>
+                        <option value="resigned">Resigned</option>
+                        <option value="other">Other (please specify)</option>
+                    </select>
+                </div>
+                <div class="form-group" id="deleteOtherReasonGroup" style="display:none;margin-top:12px;text-align:left">
+                    <label class="form-label required" for="deleteArchiveReasonOther">Please Specify the Other Reason</label>
+                    <textarea name="archive_reason_other" id="deleteArchiveReasonOther" class="form-input" rows="3" maxlength="200" placeholder="Briefly explain why this teacher is being archived"></textarea>
+                    <small class="form-help">Maximum 200 characters.</small>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button type="button" onclick="document.getElementById('deleteModal').style.display='none'" class="btn btn-ghost">Cancel</button>
                 <button type="submit" class="btn btn-danger">Archive</button>
-            </form>
-        </div>
+            </div>
+        </form>
     </div>
 </div>
 
@@ -954,8 +970,29 @@ arsort($gradeLevelStats);
 function confirmDelete(id, name) {
     document.getElementById('deleteName').textContent = name;
     document.getElementById('deleteId').value = id;
+    document.getElementById('deleteConfirmPassword').value = '';
+    document.getElementById('deleteArchiveReason').value = '';
+    document.getElementById('deleteArchiveReasonOther').value = '';
+    toggleTeacherArchiveOtherReason();
     document.getElementById('deleteModal').style.display = 'flex';
 }
+
+function toggleTeacherArchiveOtherReason() {
+    const reasonSelect = document.getElementById('deleteArchiveReason');
+    const otherGroup = document.getElementById('deleteOtherReasonGroup');
+    const otherInput = document.getElementById('deleteArchiveReasonOther');
+    if (!reasonSelect || !otherGroup || !otherInput) return;
+    const showOther = reasonSelect.value === 'other';
+    otherGroup.style.display = showOther ? 'flex' : 'none';
+    otherInput.required = showOther;
+    if (showOther) {
+        window.setTimeout(function () { otherInput.focus(); }, 0);
+    } else {
+        otherInput.value = '';
+    }
+}
+
+document.getElementById('deleteArchiveReason')?.addEventListener('change', toggleTeacherArchiveOtherReason);
 
 async function promptTeacherDeletePassword(message) {
     if (typeof Swal !== 'undefined') {
