@@ -7,6 +7,12 @@ requireLogin();
 
 header('Content-Type: application/json; charset=utf-8');
 
+if (in_array(strtolower((string)(currentUser()['role'] ?? '')), ['sdc', 'eps_vr'], true)) {
+    http_response_code(403);
+    echo json_encode(['ok' => false, 'message' => 'This role is limited to viewing records and approved exports.']);
+    exit;
+}
+
 function buildActiveContext(array $payload): ?array {
     $resultType = (string)($payload['result_type'] ?? ($_SESSION['chatbot_last_result_type'] ?? ''));
     if ($resultType === '') {

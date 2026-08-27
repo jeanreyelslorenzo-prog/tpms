@@ -25,9 +25,9 @@ foreach ($columns as $col) {
 echo "</pre>";
 
 // Extract ENUM values from Type
-$typeCheck = 'enum(\'admin\',\'hr\',\'school_head\',\'viewer\',\'psds\',\'sdc\',\'unit_head\')';
+$typeCheck = 'enum(\'admin\',\'hr\',\'school_head\',\'viewer\',\'psds\',\'sdc\',\'unit_head\',\'eps_vr\')';
 echo "<h3>Expected ENUM Values:</h3>";
-echo "<p>psds, sdc, unit_head</p>";
+echo "<p>psds, sdc, unit_head, eps_vr</p>";
 
 // Query to show actual ENUM values
 $sql = "SELECT COLUMN_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME='users' AND COLUMN_NAME='role'";

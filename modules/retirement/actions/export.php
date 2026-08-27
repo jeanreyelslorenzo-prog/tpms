@@ -4,15 +4,23 @@ require_once dirname(__DIR__, 3) . '/app/bootstrap.php';
 startSecureSession();
 requireLogin();
 
-if (!canEdit()) {
-    flash('error', 'Access denied. Export is restricted to Admin/HR accounts.');
+if (!canExportOperationalData()) {
+    flash('error', 'Access denied. Retirement export is not available for your role.');
     redirect(APP_URL . '/retirement_watch.php');
 }
 
 $db = getDB();
+ensureArchiveSchema($db);
 requireDatabaseStructure($db, [
     'teacher_clc_assignments' => ['teacher_id', 'clc_school_id', 'assignment_status'],
 ]);
+
+$scopedDistrictId = getExportDistrictScope($db, ['sdc']);
+if ($scopedDistrictId === null) {
+    logActivity('DENY', 'reports', null, 'Blocked district-scoped retirement export without a valid assigned district.');
+    flash('error', 'A valid assigned district is required before exporting retirement data.');
+    redirect(APP_URL . '/retirement_watch.php');
+}
 
 $format = strtolower(trim((string)($_GET['format'] ?? 'csv')));
 if (!in_array($format, ['csv', 'excel'], true)) {
@@ -157,11 +165,24 @@ if ($passwordHash === '' || !password_verify($confirmPassword, $passwordHash)) {
 }
 
 $where = [
+    activeArchiveExclusion('teacher', 't.id'),
     "t.birthdate IS NOT NULL",
     "t.birthdate <> '0000-00-00'",
     "TIMESTAMPDIFF(YEAR, t.birthdate, CURDATE()) BETWEEN 59 AND 65",
 ];
 $params = [];
+
+if ($scopedDistrictId > 0) {
+    $where[] = '(s.district_id = ? OR EXISTS (
+        SELECT 1 FROM teacher_clc_assignments tca_scope
+        INNER JOIN schools sc_scope ON sc_scope.id = tca_scope.clc_school_id
+        WHERE tca_scope.teacher_id = t.id
+          AND tca_scope.assignment_status = \'Active\'
+          AND sc_scope.district_id = ?
+    ))';
+    $params[] = $scopedDistrictId;
+    $params[] = $scopedDistrictId;
+}
 
 if ($search !== '') {
     $where[] = '(t.employee_number LIKE ? OR t.last_name LIKE ? OR t.first_name LIKE ? OR t.position LIKE ? OR COALESCE(s.school_name, t.school_name_raw) LIKE ?)';

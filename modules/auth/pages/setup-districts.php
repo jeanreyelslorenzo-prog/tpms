@@ -12,8 +12,36 @@ $user = currentUser();
 $db = getDB();
 $userRole = strtolower($user['role'] ?? '');
 
-// Only PSDS/SDC can access this page
-if (!in_array($userRole, ['psds', 'sdc'], true)) {
+// SDC district boundaries are administrator-assigned and cannot be changed by
+// the read-only account itself.
+if ($userRole === 'sdc') {
+    unset($_SESSION['available_districts_for_setup']);
+    http_response_code(403);
+    ?>
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>District Assignment Required - <?= clean(APP_NAME) ?></title>
+        <link rel="stylesheet" href="<?= APP_URL ?>/assets/css/style.css">
+    </head>
+    <body>
+        <main class="main-wrapper" style="margin:0 auto;max-width:680px;padding:40px 16px;">
+            <section class="glass-card" style="padding:24px;display:grid;gap:14px;">
+                <h1 style="margin:0;">District Assignment Required</h1>
+                <p class="text-muted" style="margin:0;">Your SDC account is read-only and does not yet have an assigned district. Please ask an administrator to assign one before you continue.</p>
+                <div><a class="btn btn-primary" href="<?= APP_URL ?>/logout">Return to Login</a></div>
+            </section>
+        </main>
+    </body>
+    </html>
+    <?php
+    exit;
+}
+
+// The legacy self-service setup flow remains available only to PSDS accounts.
+if ($userRole !== 'psds') {
     redirect(APP_URL . '/dashboard');
 }
 

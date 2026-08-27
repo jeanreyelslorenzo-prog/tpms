@@ -3,10 +3,10 @@ require_once dirname(__DIR__) . '/bootstrap.php';
 
 $db = getDB();
 
-echo "<h2>Database Migration: Add PSDS/SDC/Unit_Head Roles</h2>";
+echo "<h2>Database Migration: Add PSDS/SDC/Unit Head/EPS VR Roles</h2>";
 
 $migrations = [
-    "ALTER TABLE users MODIFY COLUMN role ENUM('admin','hr','school_head','viewer','psds','sdc','unit_head') DEFAULT 'viewer'",
+    "ALTER TABLE users MODIFY COLUMN role ENUM('admin','hr','school_head','viewer','psds','sdc','unit_head','eps_vr') DEFAULT 'viewer'",
     "ALTER TABLE users ADD COLUMN district_id INT UNSIGNED DEFAULT NULL AFTER role",
     "ALTER TABLE users ADD CONSTRAINT fk_user_district FOREIGN KEY (district_id) REFERENCES districts(id) ON DELETE SET NULL ON UPDATE CASCADE",
     "ALTER TABLE users ADD INDEX idx_district_id (district_id)",

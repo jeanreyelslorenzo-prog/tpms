@@ -316,23 +316,29 @@ $buildReportUrl = function(array $overrides = []) use ($search, $filterDist, $fi
         </div>
     </form>
 
+    <?php if (canExportTeacherData() || canExportOperationalData()): ?>
     <div class="reports-export-panel">
         <div class="reports-export-title"><i class="fas fa-file-export"></i> Export and Extraction</div>
         <div class="reports-export-grid">
+            <?php if (canExportTeacherData()): ?>
             <a href="<?= APP_URL ?>/actions/export.php?format=csv<?= $exportQuerySuffix ?>" class="btn btn-ghost btn-sm reports-export-btn">
                 <i class="fas fa-file-csv"></i> Export Teacher CSV
             </a>
             <a href="<?= APP_URL ?>/actions/export.php?format=excel<?= $exportQuerySuffix ?>" class="btn btn-ghost btn-sm reports-export-btn">
                 <i class="fas fa-file-excel"></i> Export Teacher Excel
             </a>
+            <?php endif; ?>
+            <?php if (canExportOperationalData()): ?>
             <a href="<?= APP_URL ?>/actions/export_school_heads.php?format=csv<?= $schoolHeadExportQuerySuffix ?>" class="btn btn-ghost btn-sm reports-export-btn reports-export-btn-heads">
                 <i class="fas fa-user-tie"></i> Tagged School Heads CSV
             </a>
             <a href="<?= APP_URL ?>/actions/export_school_heads.php?format=excel<?= $schoolHeadExportQuerySuffix ?>" class="btn btn-ghost btn-sm reports-export-btn reports-export-btn-heads">
                 <i class="fas fa-user-tie"></i> Tagged School Heads Excel
             </a>
+            <?php endif; ?>
         </div>
     </div>
+    <?php endif; ?>
 </div>
 
 <style>

@@ -66,7 +66,9 @@ adding features.
 | `admin` | Full access, user management, and activity logs |
 | `hr` | Teacher/school management, uploads, and exports |
 | `school_head` | Assigned read/export access |
-| `psds`, `sdc`, `unit_head` | Role- and district-scoped access |
+| `psds`, `unit_head` | Role- and district-scoped access |
+| `sdc` | Assigned-district read-only access and exports |
+| `eps_vr` | Division-wide read-only access and exports |
 | `viewer` | Read-only access |
 
 `viewer` is a valid read-only role in this integrated build. Only accounts with

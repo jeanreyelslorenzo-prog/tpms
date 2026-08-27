@@ -20,17 +20,11 @@ requireDatabaseStructure($db, [
     'teacher_clc_assignments' => ['teacher_id', 'clc_school_id', 'assignment_status'],
 ]);
 
-$exportRole = strtolower((string)(currentUser()['role'] ?? ''));
-$scopedDistrictId = 0;
-if ($exportRole === 'psds') {
-    $assignedDistricts = getUserDistricts($db, (int)(currentUser()['id'] ?? 0));
-    $sessionDistrict = getSessionDistrict();
-    if ($sessionDistrict === null || !in_array($sessionDistrict, $assignedDistricts, true)) {
-        logActivity('DENY', 'reports', null, 'Blocked PSDS teacher export without a valid assigned district.');
-        flash('error', 'A valid assigned district is required before exporting teacher data.');
-        redirect(APP_URL . '/reports.php');
-    }
-    $scopedDistrictId = $sessionDistrict;
+$scopedDistrictId = getExportDistrictScope($db, ['psds', 'sdc']);
+if ($scopedDistrictId === null) {
+    logActivity('DENY', 'reports', null, 'Blocked district-scoped teacher export without a valid assigned district.');
+    flash('error', 'A valid assigned district is required before exporting teacher data.');
+    redirect(APP_URL . '/reports.php');
 }
 
 $resolveSchoolFilter = static function(string $raw, PDO $db): array {

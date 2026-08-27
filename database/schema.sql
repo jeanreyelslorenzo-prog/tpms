@@ -177,7 +177,7 @@ CREATE TABLE IF NOT EXISTS users (
     password_hash   VARCHAR(255) NOT NULL,
     full_name       VARCHAR(150) NOT NULL,
     email           VARCHAR(150) DEFAULT NULL,
-    role            ENUM('admin','hr','school_head','viewer','psds','sdc','unit_head') DEFAULT NULL,
+    role            ENUM('admin','hr','school_head','viewer','psds','sdc','unit_head','eps_vr') DEFAULT NULL,
     district_id     INT UNSIGNED DEFAULT NULL,
     profile_photo   VARCHAR(255) DEFAULT NULL,
     preferred_theme VARCHAR(40)  DEFAULT NULL,
@@ -381,7 +381,8 @@ INSERT IGNORE INTO schema_migrations (version) VALUES
     ('003_school_profile_workflow'),
     ('004_formal_als_programs'),
     ('005_als_teacher_clc_assignments'),
-    ('007_als_assignment_periods');
+    ('007_als_assignment_periods'),
+    ('008_eps_vr_role');
 
 -- Circular school-head relationship is added after both tables exist.
 ALTER TABLE schools

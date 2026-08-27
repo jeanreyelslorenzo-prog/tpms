@@ -4,8 +4,8 @@ require_once dirname(__DIR__, 3) . '/app/bootstrap.php';
 startSecureSession();
 requireLogin();
 
-if (!canEdit()) {
-    flash('error', 'Access denied. Export is restricted to Admin/HR accounts.');
+if (!canExportOperationalData()) {
+    flash('error', 'Access denied. School head export is not available for your role.');
     redirect(APP_URL . '/reports.php');
 }
 
@@ -16,6 +16,13 @@ if (!in_array($format, ['csv', 'excel'], true)) {
 
 $db = getDB();
 ensureArchiveSchema($db);
+
+$scopedDistrictId = getExportDistrictScope($db, ['sdc']);
+if ($scopedDistrictId === null) {
+    logActivity('DENY', 'reports', null, 'Blocked district-scoped school head export without a valid assigned district.');
+    flash('error', 'A valid assigned district is required before exporting school head data.');
+    redirect(APP_URL . '/reports.php');
+}
 
 $search = trim((string)($_GET['q'] ?? ''));
 $filterDist = trim((string)($_GET['dist'] ?? ''));
@@ -147,6 +154,10 @@ if ($passwordHash === '' || !password_verify($confirmPassword, $passwordHash)) {
 
 $conditions = ['s.school_head_teacher_id IS NOT NULL', activeArchiveExclusion('school', 's.id'), activeArchiveExclusion('teacher', 'sh.id')];
 $params = [];
+if ($scopedDistrictId > 0) {
+    $conditions[] = 's.district_id = ?';
+    $params[] = $scopedDistrictId;
+}
 
 if ($search !== '') {
     $conditions[] = '(s.school_name LIKE ? OR s.school_id_code LIKE ? OR d.district_name LIKE ? OR CONCAT_WS(" ", sh.first_name, sh.last_name) LIKE ? OR sh.employee_number LIKE ?)';

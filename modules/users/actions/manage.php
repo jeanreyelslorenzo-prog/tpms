@@ -62,7 +62,7 @@ $errors = [];
 if ($data['username'] === '' || mb_strlen($data['username']) > 80) $errors['username'] = 'Enter a username up to 80 characters.';
 if ($data['full_name'] === '' || mb_strlen($data['full_name']) > 150) $errors['full_name'] = 'Enter a full name up to 150 characters.';
 if ($data['email'] !== '' && !filter_var($data['email'], FILTER_VALIDATE_EMAIL)) $errors['email'] = 'Enter a valid email address.';
-$allowedRoles = ['admin', 'hr', 'school_head', 'viewer', 'psds', 'sdc', 'unit_head'];
+$allowedRoles = ['admin', 'hr', 'school_head', 'viewer', 'psds', 'sdc', 'unit_head', 'eps_vr'];
 if (!in_array($data['role'], $allowedRoles, true)) $errors['role'] = 'Invalid role.';
 if (in_array($data['role'], ['psds', 'sdc', 'unit_head'], true) && !$data['district_id']) {
     $errors['district_id'] = 'Select a district for this role.';

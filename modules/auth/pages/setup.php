@@ -207,7 +207,7 @@ $statements = [
         password_hash VARCHAR(255) NOT NULL,
         full_name     VARCHAR(150) NOT NULL,
         email         VARCHAR(150) DEFAULT NULL,
-        role          ENUM('admin','hr','school_head','viewer','psds','sdc','unit_head') DEFAULT NULL,
+        role          ENUM('admin','hr','school_head','viewer','psds','sdc','unit_head','eps_vr') DEFAULT NULL,
         district_id   INT UNSIGNED DEFAULT NULL,
         profile_photo VARCHAR(255) DEFAULT NULL,
         preferred_theme VARCHAR(40) DEFAULT NULL,
@@ -371,7 +371,7 @@ $seeds = [
     "INSERT IGNORE INTO districts (id, district_name, municipality_id) VALUES
         (1,'Baler',1),(2,'Casiguran',2),(3,'Dilasag',3),(4,'Dinalungan',4),(5,'Dingalan',5),
         (6,'Dipaculao North',6),(7,'Dipaculao South',6),(8,'Maria Aurora East',7),(9,'Maria Aurora West',7),(10,'San Luis',8)",
-    "INSERT IGNORE INTO schema_migrations (version) VALUES ('001_baseline'),('002_schema_sync'),('003_school_profile_workflow'),('004_formal_als_programs'),('005_als_teacher_clc_assignments'),('007_als_assignment_periods')",
+    "INSERT IGNORE INTO schema_migrations (version) VALUES ('001_baseline'),('002_schema_sync'),('003_school_profile_workflow'),('004_formal_als_programs'),('005_als_teacher_clc_assignments'),('007_als_assignment_periods'),('008_eps_vr_role')",
     "INSERT IGNORE INTO planning_settings (id, max_students_per_class, max_classes_per_teacher, max_teaching_load_hours, recommended_student_teacher_ratio, utilization_threshold_pct, default_hours_per_class_week)
         VALUES (1, 45, 6, 30, 35, 90, 5)",
     "INSERT IGNORE INTO schools

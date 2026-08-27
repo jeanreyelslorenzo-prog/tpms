@@ -3,7 +3,7 @@
 
 -- Step 1: Modify the role ENUM to include new roles
 ALTER TABLE users 
-MODIFY COLUMN role ENUM('admin','hr','school_head','viewer','psds','sdc','unit_head') DEFAULT 'viewer';
+MODIFY COLUMN role ENUM('admin','hr','school_head','viewer','psds','sdc','unit_head','eps_vr') DEFAULT 'viewer';
 
 -- Step 2: Add district_id column to users table
 ALTER TABLE users 

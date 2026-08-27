@@ -52,7 +52,7 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS twofa_secret VARCHAR(64) DEFAULT NULL
 ALTER TABLE users ADD COLUMN IF NOT EXISTS dashboard_tour_completed TINYINT(1) DEFAULT 0 AFTER twofa_secret;
 
 -- Update role ENUM to include new roles and remove DEFAULT
-ALTER TABLE users MODIFY COLUMN role ENUM('admin','hr','school_head','viewer','psds','sdc','unit_head') DEFAULT NULL;
+ALTER TABLE users MODIFY COLUMN role ENUM('admin','hr','school_head','viewer','psds','sdc','unit_head','eps_vr') DEFAULT NULL;
 
 -- Add index for performance
 ALTER TABLE users ADD INDEX IF NOT EXISTS idx_district_id (district_id);
@@ -94,7 +94,7 @@ ALTER TABLE users ADD INDEX IF NOT EXISTS idx_district_id (district_id);
 - Go to cPanel > phpMyAdmin
 - Click SQL tab
 - Run: `SELECT COLUMN_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME='users' AND COLUMN_NAME='role';`
-- Should show: `enum('admin','hr','school_head','viewer','psds','sdc','unit_head')`
+- Should show: `enum('admin','hr','school_head','viewer','psds','sdc','unit_head','eps_vr')`
 
 **Check 2:** Verify the DEFAULT was removed
 - Same query, should show: `NULL` (not 'viewer')

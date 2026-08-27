@@ -67,15 +67,17 @@ function getRoleBadgeWithColor($role) {
         'unit_head' => '#06b6d4',
         'psds' => '#ec4899',
         'sdc' => '#f59e0b',
+        'eps_vr' => '#10b981',
         'viewer' => '#6b7280'
     ];
     $labels = [
-        'admin' => 'Administrator',
-        'hr' => 'HR / Personnel',
+        'admin' => 'Admin',
+        'hr' => 'HR',
         'school_head' => 'School Head',
         'unit_head' => 'Unit Head',
         'psds' => 'PSDS',
         'sdc' => 'SDC',
+        'eps_vr' => 'EPS VR',
         'viewer' => 'Viewer'
     ];
     $color = $colors[$role] ?? '#6b7280';
@@ -474,13 +476,14 @@ function getRoleBadgeWithColor($role) {
                     <label class="form-label required">User Role</label>
                     <select name="role" id="userRole" class="form-select" required onchange="updateDistrictFieldVisibility()">
                         <option value="">Select a role...</option>
-                        <option value="admin" <?= ($editUser['role'] ?? '') === 'admin' ? 'selected' : '' ?>>🔴 Administrator - Full system access</option>
-                        <option value="hr" <?= ($editUser['role'] ?? '') === 'hr' ? 'selected' : '' ?>>🔵 HR / Personnel - Teachers & staff management</option>
-                        <option value="school_head" <?= ($editUser['role'] ?? '') === 'school_head' ? 'selected' : '' ?>>🟣 School Head - School operations</option>
-                        <option value="unit_head" <?= ($editUser['role'] ?? '') === 'unit_head' ? 'selected' : '' ?>>🔷 Unit Head - Unit operations</option>
-                        <option value="psds" <?= ($editUser['role'] ?? '') === 'psds' ? 'selected' : '' ?>>🩷 PSDS - Public Schools Division Supervisor</option>
-                        <option value="sdc" <?= ($editUser['role'] ?? '') === 'sdc' ? 'selected' : '' ?>>🟧 SDC - Schools Division Coordinator</option>
-                        <option value="viewer" <?= ($editUser['role'] ?? '') === 'viewer' ? 'selected' : '' ?>>⚫ Viewer - Read-only access</option>
+                        <option value="admin" <?= ($editUser['role'] ?? '') === 'admin' ? 'selected' : '' ?>>Admin</option>
+                        <option value="hr" <?= ($editUser['role'] ?? '') === 'hr' ? 'selected' : '' ?>>HR</option>
+                        <option value="school_head" <?= ($editUser['role'] ?? '') === 'school_head' ? 'selected' : '' ?>>School Head</option>
+                        <option value="unit_head" <?= ($editUser['role'] ?? '') === 'unit_head' ? 'selected' : '' ?>>Unit Head</option>
+                        <option value="psds" <?= ($editUser['role'] ?? '') === 'psds' ? 'selected' : '' ?>>PSDS</option>
+                        <option value="sdc" <?= ($editUser['role'] ?? '') === 'sdc' ? 'selected' : '' ?>>SDC</option>
+                        <option value="eps_vr" <?= ($editUser['role'] ?? '') === 'eps_vr' ? 'selected' : '' ?>>EPS VR</option>
+                        <option value="viewer" <?= ($editUser['role'] ?? '') === 'viewer' ? 'selected' : '' ?>>Viewer</option>
                     </select>
                 </div>
 

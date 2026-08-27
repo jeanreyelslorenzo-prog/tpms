@@ -590,7 +590,7 @@ $exportSuffix = $exportParams !== '' ? '&' . $exportParams : '';
                 </button>
             </div>
         </div>
-        <?php if (canEdit()): ?>
+        <?php if (canExportOperationalData()): ?>
         <div class="retirement-actions-right">
             <a href="<?= APP_URL ?>/actions/export_retirement_watch.php?format=csv<?= $exportSuffix ?>" class="btn btn-ghost btn-sm"><i class="fas fa-file-csv"></i> Extract CSV</a>
             <a href="<?= APP_URL ?>/actions/export_retirement_watch.php?format=excel<?= $exportSuffix ?>" class="btn btn-ghost btn-sm"><i class="fas fa-file-excel"></i> Extract Excel</a>

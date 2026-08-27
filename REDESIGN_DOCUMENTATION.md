@@ -9,14 +9,15 @@ This document describes the comprehensive redesign of the TPMS user management s
 
 #### New Roles Added
 - **PSDS** - Public Schools Division Supervisor (manages provincial level)
-- **SDC** - Schools Division Coordinator (manages division level)
+- **SDC** - Schools Division Coordinator (assigned-district read-only access and exports)
 - **Unit Head** - Unit Head (manages specific unit)
+- **EPS VR** - Division-wide read-only access with approved exports
 
 #### Schema Changes
 ```sql
--- Modified users.role ENUM to include: 'psds', 'sdc', 'unit_head'
+-- Modified users.role ENUM to include: 'psds', 'sdc', 'unit_head', 'eps_vr'
 ALTER TABLE users 
-MODIFY COLUMN role ENUM('admin','hr','school_head','viewer','psds','sdc','unit_head');
+MODIFY COLUMN role ENUM('admin','hr','school_head','viewer','psds','sdc','unit_head','eps_vr');
 
 -- Added district_id field to users table
 ALTER TABLE users 

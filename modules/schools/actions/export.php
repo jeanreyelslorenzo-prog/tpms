@@ -4,8 +4,8 @@ require_once dirname(__DIR__, 3) . '/app/bootstrap.php';
 startSecureSession();
 requireLogin();
 
-if (!canEdit()) {
-    flash('error', 'Access denied. Export is restricted to Admin/HR accounts.');
+if (!canExportOperationalData()) {
+    flash('error', 'Access denied. School export is not available for your role.');
     redirect(APP_URL . '/schools.php');
 }
 
@@ -20,6 +20,13 @@ requireDatabaseStructure($db, [
     'teacher_clc_assignments' => ['teacher_id', 'clc_school_id', 'assignment_status'],
 ]);
 
+$scopedDistrictId = getExportDistrictScope($db, ['sdc']);
+if ($scopedDistrictId === null) {
+    logActivity('DENY', 'schools', null, 'Blocked district-scoped school export without a valid assigned district.');
+    flash('error', 'A valid assigned district is required before exporting school data.');
+    redirect(APP_URL . '/schools.php');
+}
+
 $search = clean(trim((string)($_GET['q'] ?? '')));
 $filterDist = trim((string)($_GET['dist'] ?? ''));
 $type = strtolower(trim((string)($_GET['type'] ?? 'all')));
@@ -31,9 +38,12 @@ if (strlen($search) > 500 || strlen($filterDist) > 255) {
     redirect(APP_URL . '/schools.php');
 }
 
-$allowedTypes = ['all', 'public', 'private', 'als', 'elementary', 'jhs', 'shs', 'pure_shs', 'es/jhs', 'es/shs', 'jhs/shs', 'es/jhs/shs', 'all offering', 'untagged'];
+$allowedTypes = ['all', 'public', 'private', 'als', 'kindergarten', 'elementary', 'pure_elementary', 'jhs', 'shs', 'pure_shs', 'es/jhs', 'es/shs', 'jhs/shs', 'es/jhs/shs', 'all offering', 'untagged'];
 if (!in_array($type, $allowedTypes, true)) {
     $type = 'all';
+}
+if ($type === 'es/jhs/shs') {
+    $type = 'all offering';
 }
 
 $allowedStaffing = ['all', 'no_teacher'];
@@ -137,27 +147,35 @@ if ($passwordHash === '' || !password_verify($confirmPassword, $passwordHash)) {
 
 $conditions = [activeArchiveExclusion('school', 's.id')];
 $params = [];
+if ($scopedDistrictId > 0) {
+    $conditions[] = 's.district_id = ?';
+    $params[] = $scopedDistrictId;
+}
 
 if ($search !== '') {
     $conditions[] = '(s.school_name LIKE ? OR d.district_name LIKE ? OR s.school_id_code LIKE ? OR s.municipality LIKE ? OR s.school_type LIKE ? OR s.institution_classification LIKE ?)';
     $params = array_merge($params, array_fill(0, 6, '%' . $search . '%'));
 }
 
+$schoolTypeExprCompact = "REPLACE(LOWER(TRIM(COALESCE(s.school_type, ''))), ' ', '')";
+$typeCompact = str_replace(' ', '', $type);
 if ($type === 'untagged') {
-    $conditions[] = "(s.school_type IS NULL OR TRIM(s.school_type) = '' OR LOWER(TRIM(s.school_type)) NOT IN ('elementary', 'es', 'jhs', 'shs', 'es/jhs', 'es/shs', 'jhs/shs', 'es/jhs/shs', 'all offering', 'als', 'public', 'private'))";
-} elseif ($type === 'elementary') {
-    $conditions[] = "LOWER(COALESCE(s.school_type, '')) IN ('elementary', 'es', 'es/jhs', 'es/shs', 'es/jhs/shs', 'all offering')";
+    $conditions[] = "(s.school_type IS NULL OR TRIM(s.school_type) = '' OR $schoolTypeExprCompact NOT IN ('kindergarten', 'kinder', 'elementary', 'es', 'jhs', 'shs', 'es/jhs', 'es/shs', 'jhs/shs', 'jhs-shs', 'juniorandseniorhighschool', 'es/jhs/shs', 'alloffering', 'als', 'public', 'private'))";
+} elseif ($type === 'kindergarten') {
+    $conditions[] = "$schoolTypeExprCompact IN ('kindergarten', 'kinder')";
+} elseif (in_array($type, ['elementary', 'pure_elementary'], true)) {
+    $conditions[] = "$schoolTypeExprCompact IN ('elementary', 'es')";
 } elseif ($type === 'jhs') {
-    $conditions[] = "LOWER(COALESCE(s.school_type, '')) IN ('jhs', 'jhs/shs', 'es/jhs', 'es/jhs/shs', 'all offering')";
-} elseif ($type === 'pure_shs') {
-    $conditions[] = "LOWER(COALESCE(s.school_type, '')) = 'shs'";
-} elseif ($type === 'shs') {
-    $conditions[] = "LOWER(COALESCE(s.school_type, '')) IN ('shs', 'jhs/shs', 'es/shs', 'es/jhs/shs', 'all offering')";
+    $conditions[] = "$schoolTypeExprCompact = 'jhs'";
+} elseif (in_array($type, ['shs', 'pure_shs'], true)) {
+    $conditions[] = "$schoolTypeExprCompact = 'shs'";
+} elseif ($type === 'all offering') {
+    $conditions[] = "$schoolTypeExprCompact IN ('alloffering', 'es/jhs/shs')";
 } elseif ($type === 'als') {
     $conditions[] = 's.offers_als = 1';
 } elseif ($type !== 'all') {
-    $conditions[] = "LOWER(COALESCE(s.school_type, '')) = ?";
-    $params[] = $type;
+    $conditions[] = "$schoolTypeExprCompact = ?";
+    $params[] = $typeCompact;
 }
 
 if ($staffing === 'no_teacher') {

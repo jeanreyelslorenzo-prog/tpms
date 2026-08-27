@@ -59,7 +59,7 @@ CALL tpms_add_column_if_missing('users', 'dashboard_tour_completed', 'TINYINT(1)
 DROP PROCEDURE IF EXISTS tpms_add_column_if_missing;
 
 ALTER TABLE users
-    MODIFY COLUMN role ENUM('admin','hr','school_head','viewer','psds','sdc','unit_head') DEFAULT NULL;
+    MODIFY COLUMN role ENUM('admin','hr','school_head','viewer','psds','sdc','unit_head','eps_vr') DEFAULT NULL;
 
 -- Normalize legacy signed relationship columns and clear orphan references
 -- before adding foreign keys.

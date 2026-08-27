@@ -19,7 +19,7 @@ $hasNewRoles = false;
 $hasDistrictId = false;
 
 foreach ($result as $col) {
-    if ($col['Field'] === 'role' && strpos($col['Type'], 'psds') !== false) {
+    if ($col['Field'] === 'role' && strpos($col['Type'], 'eps_vr') !== false) {
         $hasNewRoles = true;
     }
     if ($col['Field'] === 'district_id') {

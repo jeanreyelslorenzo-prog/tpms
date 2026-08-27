@@ -215,6 +215,23 @@ $schoolHeadsStmt = $db->prepare(
 $schoolHeadsStmt->execute($schoolHeadsParams);
 $schoolHeads = $schoolHeadsStmt->fetchAll();
 
+// Summary cards follow the active district context. District-scoped roles use
+// their validated session district; central roles use the page's district filter.
+$summaryDistrictId = null;
+if (shouldFilterByDistrict()) {
+    $sessionDistrictId = getSessionDistrict();
+    if ($sessionDistrictId !== null && $sessionDistrictId > 0) {
+        $summaryDistrictId = $sessionDistrictId;
+    }
+} elseif ($districtFilter !== '') {
+    $summaryDistrictStmt = $db->prepare(
+        'SELECT id FROM districts WHERE district_name = ? AND '
+        . activeArchiveExclusion('district', 'districts.id') . ' LIMIT 1'
+    );
+    $summaryDistrictStmt->execute([$districtFilter]);
+    $summaryDistrictId = (int)($summaryDistrictStmt->fetchColumn() ?: 0);
+}
+
 $typeCounts = ['all' => 0, 'public' => 0, 'private' => 0, 'als' => 0, 'kindergarten' => 0, 'elementary' => 0, 'jhs' => 0, 'shs' => 0, 'untagged' => 0];
 $exactTypeCounts = [
     'kindergarten' => 0,
@@ -232,12 +249,9 @@ $exactTypeCounts = [
 // Apply district filter for type counts
 $districtWhereClause = ' WHERE ' . activeArchiveExclusion('school', 'schools.id');
 $districtParams = [];
-if (shouldFilterByDistrict()) {
-    $selectedDistrict = getSessionDistrict();
-    if ($selectedDistrict !== null) {
-        $districtWhereClause .= ' AND district_id = ?';
-        $districtParams = [$selectedDistrict];
-    }
+if ($summaryDistrictId !== null) {
+    $districtWhereClause .= ' AND district_id = ?';
+    $districtParams = [$summaryDistrictId];
 }
 
 $typeCountQuery = 'SELECT REPLACE(LOWER(TRIM(COALESCE(school_type, ""))), " ", "") AS t, COUNT(*) AS c FROM schools' . $districtWhereClause . ' GROUP BY t';
@@ -325,12 +339,9 @@ $noTeacherWhere = "WHERE " . activeArchiveExclusion('school', 's.id') . " AND NO
           AND tca.assignment_status = 'Active'
     )
 )";
-if (shouldFilterByDistrict()) {
-    $selectedDistrict = getSessionDistrict();
-    if ($selectedDistrict !== null) {
-        $noTeacherWhere .= ' AND s.district_id = ?';
-        $noTeacherParams = [$selectedDistrict];
-    }
+if ($summaryDistrictId !== null) {
+    $noTeacherWhere .= ' AND s.district_id = ?';
+    $noTeacherParams = [$summaryDistrictId];
 }
 $noTeacherStmt = $db->prepare("SELECT COUNT(*) FROM schools s $noTeacherWhere");
 $noTeacherStmt->execute($noTeacherParams);
@@ -339,12 +350,9 @@ $noTeacherCount = (int)$noTeacherStmt->fetchColumn();
 // Calculate comprehensive stats
 $statsDistrictWhere = ' WHERE ' . activeArchiveExclusion('school', 'schools.id');
 $statsDistrictParams = [];
-if (shouldFilterByDistrict()) {
-    $selectedDistrict = getSessionDistrict();
-    if ($selectedDistrict !== null) {
-        $statsDistrictWhere .= ' AND district_id = ?';
-        $statsDistrictParams = [$selectedDistrict];
-    }
+if ($summaryDistrictId !== null) {
+    $statsDistrictWhere .= ' AND district_id = ?';
+    $statsDistrictParams = [$summaryDistrictId];
 }
 
 // Build stats query with district filter
@@ -370,7 +378,7 @@ if ($statsDistrictParams) {
             COALESCE(SUM(CASE WHEN school_type IS NULL OR TRIM(school_type) = "" OR REPLACE(LOWER(TRIM(school_type)), " ", "") NOT IN ("kindergarten", "kinder", "elementary", "es", "jhs", "shs", "es/jhs", "es/shs", "jhs/shs", "jhs-shs", "juniorandseniorhighschool", "es/jhs/shs", "alloffering", "als", "public", "private") THEN 1 ELSE 0 END), 0) AS untagged_count
          FROM schools' . $statsDistrictWhere
     );
-    $statsStmt->execute([$selectedDistrict, $selectedDistrict, $selectedDistrict]);
+    $statsStmt->execute([$summaryDistrictId, $summaryDistrictId, $summaryDistrictId]);
 } else {
     $statsStmt = $db->prepare(
         'SELECT
@@ -457,25 +465,14 @@ $buildSchoolsUrl = static function(array $overrides = []) use ($type, $staffing,
     return APP_URL . '/schools.php' . ($query ? '?' . http_build_query($query) : '');
 };
 
-$districtSchools = [];
-if ($districtFilter !== '') {
-    $districtSchoolStmt = $db->prepare(
-        'SELECT s.id, s.school_name, s.school_type,
-                (SELECT COUNT(*) FROM teachers t
-                 WHERE ' . activeArchiveExclusion('teacher', 't.id') . ' AND (t.school_id = s.id OR EXISTS (
-                    SELECT 1 FROM teacher_clc_assignments tca_count
-                    WHERE tca_count.teacher_id = t.id
-                      AND tca_count.clc_school_id = s.id
-                      AND tca_count.assignment_status = "Active"
-                 ))) AS teacher_count
-         FROM schools s
-         LEFT JOIN districts d ON s.district_id = d.id
-         WHERE d.district_name = ?
-         ORDER BY s.school_name'
-    );
-    $districtSchoolStmt->execute([$districtFilter]);
-    $districtSchools = $districtSchoolStmt->fetchAll();
-}
+$schoolExportQuery = http_build_query(array_filter([
+    'q' => $search,
+    'dist' => $districtFilter,
+    'type' => $type !== 'all' ? $type : null,
+    'staffing' => $staffing !== 'all' ? $staffing : null,
+], static fn($value) => $value !== null && $value !== ''));
+$schoolExportSuffix = $schoolExportQuery !== '' ? ('&' . $schoolExportQuery) : '';
+
 ?>
 <style>
 .school-workflow-context { position:fixed; inset:0; z-index:900; padding:clamp(24px,6vw,72px); display:flex; align-items:flex-start; justify-content:center; background:var(--bg); overflow:auto; }
@@ -835,6 +832,7 @@ if ($districtFilter !== '') {
             <div class="stt-row"><span class="stt-k">ALS</span><span class="stt-v"><?= number_format($exactTypeCounts['als']) ?></span></div>
         </div>
     </a>
+    <?php if ($summaryDistrictId === null): ?>
     <a href="<?= $buildSchoolsUrl(['type' => 'untagged', 'page' => null]) ?>" class="school-stat-link">
         <div class="school-stat-card<?= $type === 'untagged' ? ' is-active is-active-warn' : '' ?>" style="<?= $statsData['untagged_count'] > 0 ? 'border-color:rgba(251,146,60,.35);' : '' ?>">
             <div class="school-stat-head">
@@ -852,6 +850,7 @@ if ($districtFilter !== '') {
             <?php endif; ?>
         </div>
     </a>
+    <?php endif; ?>
  <!-- #region --></div>
 
 
@@ -949,8 +948,17 @@ if ($districtFilter !== '') {
         });
     })();
     </script>
-    <?php if (canEdit()): ?>
+    <?php if (canExportOperationalData() || canEdit()): ?>
     <div class="filter-actions">
+        <?php if (canExportOperationalData()): ?>
+        <a href="<?= APP_URL ?>/actions/export_schools.php?format=csv<?= clean($schoolExportSuffix) ?>" class="btn btn-ghost">
+            <i class="fas fa-file-csv"></i> Export CSV
+        </a>
+        <a href="<?= APP_URL ?>/actions/export_schools.php?format=excel<?= clean($schoolExportSuffix) ?>" class="btn btn-ghost">
+            <i class="fas fa-file-excel"></i> Export Excel
+        </a>
+        <?php endif; ?>
+        <?php if (canEdit()): ?>
         <a href="<?= APP_URL ?>/requirement_planning.php" class="btn btn-ghost">
             <i class="fas fa-diagram-project"></i> Teacher Requirement Planning
         </a>
@@ -962,36 +970,23 @@ if ($districtFilter !== '') {
         <button class="btn btn-primary" onclick="openSchoolModal()">
             <i class="fas fa-plus"></i> Add School
         </button>
+        <?php endif; ?>
     </div>
     <?php endif; ?>
 </div>
 
 <?php if ($districtFilter !== ''): ?>
 <div class="glass-card schools-district-panel" style="margin-top:12px;padding:14px 16px;border:1px solid rgba(56,189,248,.28);background:linear-gradient(135deg, rgba(14,116,144,.18), rgba(30,64,175,.12));">
-    <div class="schools-district-panel-title" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
+    <div class="schools-district-panel-title" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
         <div style="display:flex;align-items:center;gap:8px;">
             <i class="fas fa-map-location-dot" style="color:#67e8f9;"></i>
             <strong style="color:#e2e8f0;">District: <?= clean($districtFilter) ?></strong>
-            <span class="badge badge-blue"><?= number_format(count($districtSchools)) ?> Schools</span>
+            <span class="badge badge-blue"><?= number_format((int)$statsData['total_schools']) ?> Schools</span>
         </div>
         <a href="<?= $buildSchoolsUrl(['district' => null, 'page' => null]) ?>" class="btn btn-ghost btn-sm">
             <i class="fas fa-xmark"></i> Clear District
         </a>
     </div>
-    <?php if ($districtSchools): ?>
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;">
-        <?php foreach ($districtSchools as $ds): ?>
-        <a href="<?= APP_URL ?>/view_school.php?id=<?= urlencode(encryptId((int)$ds['id'])) ?>"
-           class="schools-district-item"
-           style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:10px 12px;border-radius:10px;border:1px solid rgba(148,163,184,.25);background:rgba(15,23,42,.35);text-decoration:none;">
-            <span class="schools-district-item-name" style="color:#e2e8f0;font-weight:600;"><?= clean($ds['school_name']) ?></span>
-            <span class="badge badge-green"><?= number_format((int)$ds['teacher_count']) ?> Teachers</span>
-        </a>
-        <?php endforeach; ?>
-    </div>
-    <?php else: ?>
-    <div class="text-muted">No schools found in this district.</div>
-    <?php endif; ?>
 </div>
 <?php endif; ?>
 

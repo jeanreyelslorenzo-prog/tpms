@@ -128,7 +128,7 @@ try {
     }
     
     // Migration 5: Update role ENUM to include new roles
-    echo "[$migrationNumber/$totalMigrations] Updating role ENUM to include psds, sdc, unit_head...\n";
+    echo "[$migrationNumber/$totalMigrations] Updating role ENUM to include psds, sdc, unit_head, eps_vr...\n";
     $migrationNumber++;
     try {
         // Check current ENUM values safely
@@ -144,10 +144,10 @@ try {
         
         if (!$colInfo) {
             echo "⚠ Could not determine role column type\n\n";
-        } elseif (strpos($colInfo['COLUMN_TYPE'], 'psds') === false) {
+        } elseif (strpos($colInfo['COLUMN_TYPE'], 'eps_vr') === false) {
             // ENUM needs update - use MODIFY COLUMN (compatible with all modern MySQL/MariaDB)
             try {
-                $db->exec("ALTER TABLE users MODIFY COLUMN role ENUM('admin','hr','school_head','viewer','psds','sdc','unit_head') DEFAULT NULL");
+                $db->exec("ALTER TABLE users MODIFY COLUMN role ENUM('admin','hr','school_head','viewer','psds','sdc','unit_head','eps_vr') DEFAULT NULL");
                 echo "✓ Role ENUM updated and DEFAULT changed to NULL\n";
                 echo "  ℹ This enables role selection flow for certain users\n\n";
             } catch (Exception $e) {
@@ -155,12 +155,12 @@ try {
                 echo "⚠ MODIFY COLUMN failed, attempting alternative method...\n";
                 try {
                     // This is a safe fallback that works on almost any MySQL version
-                    $db->exec("ALTER TABLE users CHANGE COLUMN role role ENUM('admin','hr','school_head','viewer','psds','sdc','unit_head') DEFAULT NULL");
+                    $db->exec("ALTER TABLE users CHANGE COLUMN role role ENUM('admin','hr','school_head','viewer','psds','sdc','unit_head','eps_vr') DEFAULT NULL");
                     echo "✓ Role ENUM updated using CHANGE COLUMN\n\n";
                 } catch (Exception $e2) {
                     echo "✗ Error: " . $e->getMessage() . "\n";
                     echo "  Manual fix required. In phpMyAdmin SQL tab, run:\n";
-                    echo "  ALTER TABLE users MODIFY COLUMN role ENUM('admin','hr','school_head','viewer','psds','sdc','unit_head') DEFAULT NULL;\n\n";
+                    echo "  ALTER TABLE users MODIFY COLUMN role ENUM('admin','hr','school_head','viewer','psds','sdc','unit_head','eps_vr') DEFAULT NULL;\n\n";
                 }
             }
         } else {

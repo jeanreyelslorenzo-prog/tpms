@@ -522,9 +522,37 @@ function canEdit(): bool {
     return in_array($_SESSION['role'] ?? '', ['admin', 'hr'], true);
 }
 
-/** Teacher exports are available to central staff and district-scoped PSDS accounts. */
+/** Teacher exports are available to central staff and approved read-only roles. */
 function canExportTeacherData(): bool {
-    return in_array(strtolower((string)($_SESSION['role'] ?? '')), ['admin', 'hr', 'psds'], true);
+    return in_array(strtolower((string)($_SESSION['role'] ?? '')), ['admin', 'hr', 'psds', 'sdc', 'eps_vr'], true);
+}
+
+/** School and retirement exports are available to central staff and read-only export roles. */
+function canExportOperationalData(): bool {
+    return in_array(strtolower((string)($_SESSION['role'] ?? '')), ['admin', 'hr', 'sdc', 'eps_vr'], true);
+}
+
+/**
+ * Return the enforced district for an export.
+ *
+ * A zero result means division-wide access. A positive result is the validated
+ * district boundary. NULL means a district-scoped role has no valid selected
+ * district and the export must be denied.
+ */
+function getExportDistrictScope(PDO $db, array $districtScopedRoles): ?int {
+    $role = strtolower((string)($_SESSION['role'] ?? ''));
+    if (!in_array($role, $districtScopedRoles, true)) {
+        return 0;
+    }
+
+    $userId = (int)($_SESSION['user_id'] ?? 0);
+    $selectedDistrict = getSessionDistrict();
+    if ($userId <= 0 || $selectedDistrict === null || $selectedDistrict <= 0) {
+        return null;
+    }
+
+    $assignedDistricts = getUserDistricts($db, $userId);
+    return in_array($selectedDistrict, $assignedDistricts, true) ? $selectedDistrict : null;
 }
 
 function isAdmin(): bool {

@@ -18,10 +18,10 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS dashboard_tour_completed TINYINT(1) D
 
 -- 5. Update the role ENUM to include new roles and remove default
 -- Method 1: Using MODIFY (works on most MySQL versions)
-ALTER TABLE users MODIFY COLUMN role ENUM('admin','hr','school_head','viewer','psds','sdc','unit_head') DEFAULT NULL;
+ALTER TABLE users MODIFY COLUMN role ENUM('admin','hr','school_head','viewer','psds','sdc','unit_head','eps_vr') DEFAULT NULL;
 
 -- If Method 1 fails, try Method 2: Using CHANGE (also widely supported)
--- ALTER TABLE users CHANGE COLUMN role role ENUM('admin','hr','school_head','viewer','psds','sdc','unit_head') DEFAULT NULL;
+-- ALTER TABLE users CHANGE COLUMN role role ENUM('admin','hr','school_head','viewer','psds','sdc','unit_head','eps_vr') DEFAULT NULL;
 
 -- 6. Add index for district_id if it doesn't exist
 -- This improves query performance when filtering by district
@@ -35,7 +35,7 @@ ALTER TABLE users ADD INDEX IF NOT EXISTS idx_district_id (district_id);
 
 -- Expected output for role column:
 -- Field: role
--- Type: enum('admin','hr','school_head','viewer','psds','sdc','unit_head')
+-- Type: enum('admin','hr','school_head','viewer','psds','sdc','unit_head','eps_vr')
 -- Null: YES
 -- Key: MUL
 -- Default: NULL

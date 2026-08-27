@@ -28,9 +28,16 @@ $roleMessages = [
     'sdc' => [
         'title' => 'Welcome, SDC',
         'subtitle' => 'Schools Division Coordinator',
-        'description' => 'You now have access to your district\'s teacher and school management systems. Monitor staffing, view reports, and manage personnel information for your district.',
+        'description' => 'You have read-only access to teacher, school, staffing, and report information for your assigned district, including approved exports.',
         'icon' => 'fa-chart-line',
         'color' => '#f59e0b'
+    ],
+    'eps_vr' => [
+        'title' => 'Welcome, EPS VR',
+        'subtitle' => 'Education Program Supervisor - VR',
+        'description' => 'You have division-wide read-only access to teacher, school, staffing, and report information, including approved exports.',
+        'icon' => 'fa-magnifying-glass-chart',
+        'color' => '#10b981'
     ],
     'unit_head' => [
         'title' => 'Welcome, Unit Head',

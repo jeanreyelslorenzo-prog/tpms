@@ -1786,12 +1786,13 @@ function getUserById(PDO $db, int $userId): ?array {
  */
 function getRoleDisplayName(string $role): string {
     return match(strtolower($role)) {
-        'admin' => 'Administrator',
-        'hr' => 'HR / Personnel',
+        'admin' => 'Admin',
+        'hr' => 'HR',
         'school_head' => 'School Head',
         'unit_head' => 'Unit Head',
         'psds' => 'PSDS',
         'sdc' => 'SDC',
+        'eps_vr' => 'EPS VR',
         'viewer' => 'Viewer',
         default => ucfirst(str_replace('_', ' ', $role)),
     };

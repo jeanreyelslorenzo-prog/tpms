@@ -37,6 +37,10 @@ if (in_array($normalizedRole, ['psds', 'sdc', 'unit_head'], true)) {
     $sessionDistrict = getSessionDistrict();
     if (!$assignedDistricts) {
         clearSessionDistrict();
+        if ($normalizedRole === 'sdc') {
+            $_SESSION['available_districts_for_setup'] = true;
+            redirect(APP_URL . '/setup-districts');
+        }
     } elseif ($sessionDistrict === null || !in_array($sessionDistrict, $assignedDistricts, true)) {
         setSessionDistrict($assignedDistricts[0]);
     }
@@ -152,7 +156,7 @@ $navLinks = [
     ['href' => 'reports',    'icon' => 'chart-bar',          'label' => 'Reports',     'page' => 'reports'],
     ['href' => 'archived',   'icon' => 'box-archive',       'label' => 'Archived Records', 'page' => 'archived', 'roles' => ['admin', 'hr']],
     ['href' => 'updates',    'icon' => 'history',            'label' => 'Updates',     'page' => 'updates'],
-    ['href' => 'chatbot',    'icon' => 'robot',              'label' => 'Tala AI',  'page' => 'chatbot', 'hideForRoles' => ['psds', 'sdc', 'unit_head']],
+    ['href' => 'chatbot',    'icon' => 'robot',              'label' => 'Tala AI',  'page' => 'chatbot', 'hideForRoles' => ['psds', 'sdc', 'unit_head', 'eps_vr']],
     ['href' => 'my_activity','icon' => 'user-clock',         'label' => 'My Activity', 'page' => 'my_activity']
 
 ];
