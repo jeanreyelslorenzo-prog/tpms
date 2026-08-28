@@ -226,7 +226,6 @@ $stmt = $db->prepare(
             t.grade_level, t.specialization, t.subjects,
             t.highest_education, t.field_of_study, t.csee_eligibility,
             CONCAT_WS(', ',
-                NULLIF(TRIM(COALESCE(t.house_street, '')), ''),
                 NULLIF(TRIM(COALESCE(t.barangay, '')), ''),
                 NULLIF(TRIM(COALESCE(t.municipality, '')), ''),
                 NULLIF(TRIM(COALESCE(t.province, '')), '')

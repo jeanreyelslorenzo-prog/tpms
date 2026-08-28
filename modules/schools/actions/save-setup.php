@@ -27,7 +27,12 @@ if ($schoolId > 0) {
 
 $db = getDB();
 requireDatabaseStructure($db, [
-    'schools' => ['school_head_teacher_id', 'learner_count', 'total_sections'],
+    'schools' => [
+        'school_head_teacher_id', 'learner_count', 'total_sections', 'municipality_id',
+        'barangay', 'barangay_psgc_code', 'municipality_psgc_code',
+        'province', 'province_psgc_code',
+    ],
+    'municipalities' => ['id', 'municipality_name', 'province_name'],
     'school_curricular_offerings' => ['school_id', 'offering_code'],
     'school_level_statistics' => ['school_id', 'level_code', 'learner_count', 'class_count'],
     'teachers' => ['employee_number', 'first_name', 'last_name', 'position', 'school_id', 'school_id_code_raw', 'school_name_raw'],
@@ -37,7 +42,7 @@ requireDatabaseStructure($db, [
 ]);
 
 $schoolStmt = $db->prepare(
-    'SELECT id, school_name, school_id_code, school_year, offers_formal_education, offers_als
+    'SELECT id, school_name, school_id_code, school_year, offers_formal_education, offers_als, municipality_id
      FROM schools WHERE id = ? LIMIT 1'
 );
 $schoolStmt->execute([$schoolId]);
@@ -86,6 +91,14 @@ for ($i = 0; $i < $rowCount; $i++) {
 }
 
 $errors = [];
+$addressValidation = validateAuroraAddress(
+    $db,
+    (int)($school['municipality_id'] ?? 0),
+    $scalarString($_POST['barangay'] ?? ''),
+    $scalarString($_POST['barangay_psgc_code'] ?? '')
+);
+if ($addressValidation['error'] !== null) $errors[] = $addressValidation['error'];
+$normalizedAddress = $addressValidation['address'];
 $confirmPassword = $scalarString($_POST['confirm_password'] ?? '');
 $currentUserId = (int)(currentUser()['id'] ?? 0);
 $passwordStmt = $db->prepare('SELECT password_hash FROM users WHERE id = ? LIMIT 1');
@@ -236,8 +249,15 @@ try {
     }
 
     $db->prepare(
-        'UPDATE schools SET school_head_teacher_id = ?, learner_count = ?, total_sections = ?, updated_at = NOW() WHERE id = ?'
-    )->execute([$schoolHeadId, $totalLearners, $totalClasses, $schoolId]);
+        'UPDATE schools SET school_head_teacher_id = ?, learner_count = ?, total_sections = ?, '
+        . 'barangay = ?, barangay_psgc_code = ?, municipality_psgc_code = ?, '
+        . 'province = ?, province_psgc_code = ?, updated_at = NOW() WHERE id = ?'
+    )->execute([
+        $schoolHeadId, $totalLearners, $totalClasses, $normalizedAddress['barangay'],
+        $normalizedAddress['barangay_psgc_code'],
+        $normalizedAddress['municipality_psgc_code'], $normalizedAddress['province'],
+        $normalizedAddress['province_psgc_code'], $schoolId,
+    ]);
 
     logActivity(
         'UPDATE',

@@ -8,6 +8,8 @@ $db = getDB();
 ensureTeacherPlanningSchema($db);
 ensureArchiveSchema($db);
 requireDatabaseStructure($db, [
+    'municipalities' => ['id', 'municipality_name', 'province_name'],
+    'teachers' => ['barangay_psgc_code', 'municipality_psgc_code', 'province_psgc_code'],
     'teacher_clc_assignments' => ['teacher_id', 'clc_school_id', 'school_year', 'is_primary', 'assignment_status'],
     'als_teacher_assignments' => ['teacher_id', 'start_school_year', 'end_school_year', 'assignment_status'],
     'als_teacher_assignment_clcs' => ['assignment_id', 'clc_school_id', 'is_primary'],
@@ -53,6 +55,18 @@ $districts = $db->query('SELECT d.id, d.district_name FROM districts d WHERE ' .
 $formState = pullFormState('teacher.update.' . $id);
 $errors  = $formState['errors'];
 $data    = $formState['data'] ? array_replace($teacher, $formState['data']) : $teacher;
+$addressMunicipalities = $db->query(
+    "SELECT id, municipality_name FROM municipalities WHERE province_name = 'Aurora' ORDER BY municipality_name"
+)->fetchAll(PDO::FETCH_ASSOC);
+$selectedAddressMunicipalityId = (int)($data['municipality_id'] ?? 0);
+if ($selectedAddressMunicipalityId <= 0 && trim((string)($data['municipality'] ?? '')) !== '') {
+    foreach ($addressMunicipalities as $addressMunicipality) {
+        if (strcasecmp((string)$addressMunicipality['municipality_name'], trim((string)$data['municipality'])) === 0) {
+            $selectedAddressMunicipalityId = (int)$addressMunicipality['id'];
+            break;
+        }
+    }
+}
 $alsCenters = fetchAlsCenters($db, shouldFilterByDistrict() ? (int)getSessionDistrict() : null);
 
 $requestedAssignmentYear = normalizeSchoolYear(trim((string)($_GET['assignment_year'] ?? '')));
@@ -200,28 +214,30 @@ if ($selectedDistrictId <= 0 && trim((string)($data['district_raw'] ?? '')) !== 
     </div>
 
     <div class="form-section glass-card">
-        <div class="section-header"><h3><i class="fas fa-map-marker-alt"></i> Complete Residential Address</h3></div>
+        <div class="section-header"><h3><i class="fas fa-map-marker-alt"></i> Residential Address</h3></div>
         <div class="form-grid">
-            <div class="form-group" style="grid-column:span 2">
-                <label class="form-label">House No. / Lot / Block No. / Street / Sitio / Subdivision</label>
-                <input type="text" name="house_street" maxlength="255" class="form-input"
-                       value="<?= clean($data['house_street'] ?? '') ?>" placeholder="e.g. Lot 5 Block 3, Rizal St., Poblacion">
+            <div class="form-group">
+                <label class="form-label required" for="teacherMunicipalityEdit">Municipality</label>
+                <select name="municipality_id" id="teacherMunicipalityEdit" class="form-select <?= isset($errors['address']) ? 'is-invalid' : '' ?>" required>
+                    <option value="">Select municipality…</option>
+                    <?php foreach ($addressMunicipalities as $addressMunicipality): ?>
+                    <option value="<?= (int)$addressMunicipality['id'] ?>" <?= $selectedAddressMunicipalityId === (int)$addressMunicipality['id'] ? 'selected' : '' ?>><?= clean($addressMunicipality['municipality_name']) ?></option>
+                    <?php endforeach; ?>
+                </select>
             </div>
             <div class="form-group">
-                <label class="form-label">Barangay</label>
-                <input type="text" name="barangay" maxlength="100" class="form-input"
-                       value="<?= clean($data['barangay'] ?? '') ?>" placeholder="e.g. Brgy. Poblacion">
-            </div>
-            <div class="form-group">
-                <label class="form-label">City / Municipality</label>
-                <input type="text" name="municipality" maxlength="100" class="form-input"
-                       value="<?= clean($data['municipality'] ?? '') ?>" placeholder="e.g. Baler">
+                <label class="form-label required" for="teacherBarangayEdit">Barangay</label>
+                <select name="barangay_psgc_code" id="teacherBarangayEdit" class="form-select <?= isset($errors['address']) ? 'is-invalid' : '' ?>" required data-selected-code="<?= clean($data['barangay_psgc_code'] ?? '') ?>">
+                    <?php if (!empty($data['barangay'])): ?><option value="<?= clean($data['barangay_psgc_code'] ?? '') ?>" data-name="<?= clean($data['barangay']) ?>" selected><?= clean($data['barangay']) ?></option><?php else: ?><option value="">Select municipality first…</option><?php endif; ?>
+                </select>
+                <input type="hidden" name="barangay" id="teacherBarangayNameEdit" value="<?= clean($data['barangay'] ?? '') ?>">
+                <small class="text-muted" id="teacherAddressStatusEdit">Barangays load from the PSGC address service.</small>
             </div>
             <div class="form-group">
                 <label class="form-label">Province</label>
-                <input type="text" name="province" maxlength="100" class="form-input"
-                       value="<?= clean($data['province'] ?? '') ?>" placeholder="e.g. Aurora">
+                <input type="text" class="form-input" value="Aurora" readonly aria-readonly="true">
             </div>
+            <?php if (isset($errors['address'])): ?><div class="form-error" style="grid-column:1/-1;"><?= clean($errors['address']) ?></div><?php endif; ?>
         </div>
     </div>
 
@@ -436,13 +452,21 @@ if ($selectedDistrictId <= 0 && trim((string)($data['district_raw'] ?? '')) !== 
 </form>
 </div>
 
+<script src="<?= APP_URL ?>/assets/js/aurora-address.js"></script>
 <script>
-const teacherEntryLimits = <?= json_encode(['employee_number'=>7,'last_name'=>60,'first_name'=>60,'middle_name'=>60,'extension_name'=>10,'house_street'=>255,'barangay'=>100,'municipality'=>100,'province'=>100,'contact_number'=>11,'email_address'=>150,'position'=>100,'item_number'=>20,'salary_grade'=>20,'plantilla_station'=>255,'subjects'=>500,'field_of_study'=>150,'csee_eligibility'=>150]) ?>;
+const teacherEntryLimits = <?= json_encode(['employee_number'=>7,'last_name'=>60,'first_name'=>60,'middle_name'=>60,'extension_name'=>10,'barangay'=>100,'municipality'=>100,'province'=>100,'contact_number'=>11,'email_address'=>150,'position'=>100,'item_number'=>20,'salary_grade'=>20,'plantilla_station'=>255,'subjects'=>500,'field_of_study'=>150,'csee_eligibility'=>150]) ?>;
 Object.entries(teacherEntryLimits).forEach(([name, limit]) => document.querySelectorAll(`[name="${name}"]`).forEach((field) => field.maxLength = limit));
 const teacherPositionSalaryGrades = <?= json_encode(TEACHER_POSITION_SALARY_GRADES, JSON_UNESCAPED_UNICODE) ?>;
 const teacherPositionMonthlySalaries = <?= json_encode(TEACHER_POSITION_MONTHLY_SALARIES, JSON_UNESCAPED_UNICODE) ?>;
 const initialTeacherPosition = <?= json_encode($currentPosition, JSON_UNESCAPED_UNICODE) ?>;
 const initialTeacherSalaryGrade = <?= json_encode((string)($data['salary_grade'] ?? ''), JSON_UNESCAPED_UNICODE) ?>;
+initializeAuroraAddressPicker({
+    endpoint: <?= json_encode(APP_URL . '/actions/address_options.php', JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>,
+    municipalitySelectId: 'teacherMunicipalityEdit',
+    barangaySelectId: 'teacherBarangayEdit',
+    barangayNameInputId: 'teacherBarangayNameEdit',
+    statusId: 'teacherAddressStatusEdit',
+});
 
 function syncTeacherSalaryGrade(selectId, salaryId, referenceId) {
     const positionSelect = document.getElementById(selectId);

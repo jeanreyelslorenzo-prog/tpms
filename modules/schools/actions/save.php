@@ -23,6 +23,8 @@ $code = $scalar('school_id_code');
 $sector = strtolower($scalar('sector'));
 $municipalityId = (int)($_POST['municipality_id'] ?? 0);
 $districtId = (int)($_POST['district_id'] ?? 0);
+$barangay = $scalar('barangay');
+$barangayPsgcCode = $scalar('barangay_psgc_code');
 $programInput = is_array($_POST['education_programs'] ?? null) ? $_POST['education_programs'] : [];
 $programs = [];
 foreach ($programInput as $program) {
@@ -52,9 +54,13 @@ if (($hasFormal || $hasAls) && !preg_match('/^\d{' . $requiredLength . '}$/', $c
 
 $db = getDB();
 requireDatabaseStructure($db, [
-    'municipalities' => ['id', 'municipality_name'],
+    'municipalities' => ['id', 'municipality_name', 'province_name'],
     'districts' => ['id', 'municipality_id'],
-    'schools' => ['municipality_id', 'sector', 'school_category', 'offers_formal_education', 'offers_als', 'institution_classification'],
+    'schools' => [
+        'municipality_id', 'sector', 'school_category', 'offers_formal_education', 'offers_als',
+        'institution_classification', 'barangay', 'barangay_psgc_code',
+        'municipality_psgc_code', 'province', 'province_psgc_code',
+    ],
     'school_curricular_offerings' => ['school_id', 'offering_code'],
 ]);
 $municipality = null;
@@ -71,6 +77,17 @@ if ($districtId > 0 && $municipalityId > 0) {
     $districtValid = (bool)$stmt->fetchColumn();
 }
 if (!$districtValid) $errors[] = 'Select a district belonging to the municipality.';
+$normalizedAddress = null;
+if ($municipalityId > 0) {
+    $addressValidation = validateAuroraAddress(
+        $db,
+        $municipalityId,
+        $barangay,
+        $barangayPsgcCode
+    );
+    if ($addressValidation['error'] !== null) $errors[] = $addressValidation['error'];
+    else $normalizedAddress = $addressValidation['address'];
+}
 $duplicate = $db->prepare('SELECT id FROM schools WHERE school_id_code = ? AND id <> ? LIMIT 1');
 $duplicate->execute([$code, $id]);
 if ($duplicate->fetchColumn()) $errors[] = 'That School ID is already used by another school.';
@@ -88,11 +105,16 @@ try {
     $update = $db->prepare(
         'UPDATE schools SET school_name=?, school_id_code=?, municipality=?, municipality_id=?, sector=?, '
         . 'school_category=?, offers_formal_education=?, offers_als=?, institution_classification=?, '
-        . 'school_type=?, als_subtype=?, district_id=?, updated_at=NOW() WHERE id=?'
+        . 'school_type=?, als_subtype=?, district_id=?, barangay=?, '
+        . 'barangay_psgc_code=?, municipality_psgc_code=?, province=?, province_psgc_code=?, '
+        . 'updated_at=NOW() WHERE id=?'
     );
     $update->execute([$name, $code, (string)$municipality, $municipalityId, $sector, $profile['category'],
         $profile['has_formal'] ? 1 : 0, $profile['has_als'] ? 1 : 0, $profile['classification'],
-        $legacyType, $alsSubtype, $districtId, $id]);
+        $legacyType, $alsSubtype, $districtId, $normalizedAddress['barangay'],
+        $normalizedAddress['barangay_psgc_code'],
+        $normalizedAddress['municipality_psgc_code'], $normalizedAddress['province'],
+        $normalizedAddress['province_psgc_code'], $id]);
     if ($update->rowCount() === 0) {
         $exists = $db->prepare('SELECT id FROM schools WHERE id = ?');
         $exists->execute([$id]);

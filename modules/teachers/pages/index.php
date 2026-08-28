@@ -620,7 +620,6 @@ arsort($gradeLevelStats);
             <tr>
                 <?php
                     $addrParts = array_filter([
-                        $t['house_street'] ?? '',
                         $t['barangay'] ?? '',
                         $t['municipality'] ?? '',
                         $t['province'] ?? '',
@@ -687,7 +686,6 @@ arsort($gradeLevelStats);
 <div class="teacher-card glass-card<?= (int)($t['school_head_count'] ?? 0) > 0 ? ' teacher-card-head' : '' ?>">
     <?php
         $addrParts = array_filter([
-            $t['house_street'] ?? '',
             $t['barangay'] ?? '',
             $t['municipality'] ?? '',
             $t['province'] ?? '',

@@ -10,11 +10,13 @@ ensureArchiveSchema($db);
 $activeTeacherPredicate = activeArchiveExclusion('teacher', 't.id');
 ensureTeacherPlanningSchema($db);
 requireDatabaseStructure($db, [
-    'municipalities' => ['id', 'municipality_name'],
+    'municipalities' => ['id', 'municipality_name', 'province_name'],
     'districts' => ['id', 'district_name', 'municipality_id'],
     'schools' => [
         'municipality_id', 'sector', 'school_category', 'offers_formal_education',
         'offers_als', 'institution_classification', 'school_head_teacher_id',
+        'barangay', 'barangay_psgc_code', 'municipality_psgc_code',
+        'province', 'province_psgc_code',
     ],
     'school_curricular_offerings' => ['school_id', 'offering_code'],
     'school_level_statistics' => ['school_id', 'level_code', 'learner_count', 'class_count'],
@@ -22,11 +24,13 @@ requireDatabaseStructure($db, [
 ]);
 
 $municipalities = $db->query(
-    'SELECT id, municipality_name FROM municipalities ORDER BY municipality_name'
+    "SELECT id, municipality_name FROM municipalities WHERE province_name = 'Aurora' ORDER BY municipality_name"
 )->fetchAll();
 $schoolFormDistricts = $db->query(
-    'SELECT id, district_name, municipality_id FROM districts '
-    . 'WHERE municipality_id IS NOT NULL AND ' . activeArchiveExclusion('district', 'districts.id') . ' ORDER BY district_name'
+    'SELECT districts.id, districts.district_name, districts.municipality_id FROM districts '
+    . 'INNER JOIN municipalities m_address ON m_address.id = districts.municipality_id '
+    . "WHERE districts.municipality_id IS NOT NULL AND m_address.province_name = 'Aurora' AND "
+    . activeArchiveExclusion('district', 'districts.id') . ' ORDER BY districts.district_name'
 )->fetchAll();
 
 $addSchoolState = pullFormState('school.create');
@@ -68,8 +72,12 @@ if (canEdit() && $setupSchoolRaw !== '') {
     $setupSchoolId = $decodedSetupId === false ? 0 : (int)$decodedSetupId;
     if ($setupSchoolId > 0) {
         $setupStmt = $db->prepare(
-            'SELECT id, school_name, school_id_code, school_category, school_head_teacher_id '
-            . 'FROM schools WHERE id = ? LIMIT 1'
+            'SELECT s.id, s.school_name, s.school_id_code, s.school_category, s.school_head_teacher_id, '
+            . 's.municipality_id, s.barangay, s.barangay_psgc_code, '
+            . 's.municipality_psgc_code, s.province, s.province_psgc_code, '
+            . 'COALESCE(NULLIF(m.municipality_name, ""), NULLIF(s.municipality, "")) AS municipality_name '
+            . 'FROM schools s LEFT JOIN municipalities m ON m.id = s.municipality_id '
+            . 'WHERE s.id = ? LIMIT 1'
         );
         $setupStmt->execute([$setupSchoolId]);
         $setupSchool = $setupStmt->fetch() ?: null;
@@ -1309,7 +1317,7 @@ $schoolExportSuffix = $schoolExportQuery !== '' ? ('&' . $schoolExportQuery) : '
                 </div>
                 <div class="form-group">
                     <label class="form-label required">Municipality</label>
-                    <select name="municipality_id" id="addSchoolMunicipality" class="form-select <?= isset($addSchoolErrors['municipality_id']) ? 'is-invalid' : '' ?>" required onchange="filterAddSchoolDistricts(true)">
+                    <select name="municipality_id" id="addSchoolMunicipality" class="form-select <?= isset($addSchoolErrors['municipality_id']) ? 'is-invalid' : '' ?>" required onchange="handleAddSchoolMunicipalityChange()">
                         <option value="">Select municipality…</option>
                         <?php foreach ($municipalities as $municipalityRow): ?>
                         <option value="<?= (int)$municipalityRow['id'] ?>" <?= (int)($addSchoolData['municipality_id'] ?? 0) === (int)$municipalityRow['id'] ? 'selected' : '' ?>><?= clean($municipalityRow['municipality_name']) ?></option>
@@ -1327,6 +1335,22 @@ $schoolExportSuffix = $schoolExportQuery !== '' ? ('&' . $schoolExportQuery) : '
                     </select>
                     <?php if (isset($addSchoolErrors['district_id'])): ?><span class="form-error"><?= clean($addSchoolErrors['district_id']) ?></span><?php endif; ?>
                 </div>
+                <div class="form-group">
+                    <label class="form-label">Province</label>
+                    <input type="text" class="form-input" value="Aurora" readonly aria-readonly="true">
+                    <small class="text-muted">School addresses are limited to Aurora.</small>
+                </div>
+                <div class="form-group">
+                    <label class="form-label required" for="addSchoolBarangay">Barangay</label>
+                    <select name="barangay_psgc_code" id="addSchoolBarangay" class="form-select <?= isset($addSchoolErrors['address']) ? 'is-invalid' : '' ?>" required data-selected-code="<?= clean($addSchoolData['barangay_psgc_code'] ?? '') ?>">
+                        <?php if (!empty($addSchoolData['barangay_psgc_code']) && !empty($addSchoolData['barangay'])): ?>
+                        <option value="<?= clean($addSchoolData['barangay_psgc_code']) ?>" data-name="<?= clean($addSchoolData['barangay']) ?>" selected><?= clean($addSchoolData['barangay']) ?></option>
+                        <?php else: ?><option value="">Select municipality first…</option><?php endif; ?>
+                    </select>
+                    <input type="hidden" name="barangay" id="addSchoolBarangayName" value="<?= clean($addSchoolData['barangay'] ?? '') ?>">
+                    <small class="text-muted" id="addSchoolAddressStatus">Barangays load from the PSGC address service.</small>
+                </div>
+                <?php if (isset($addSchoolErrors['address'])): ?><div class="form-error" style="grid-column:1/-1;"><?= clean($addSchoolErrors['address']) ?></div><?php endif; ?>
             </div>
 
             <?php
@@ -1426,7 +1450,7 @@ $schoolExportSuffix = $schoolExportQuery !== '' ? ('&' . $schoolExportQuery) : '
             </div>
             <div class="form-group">
                 <label class="form-label required">Municipality</label>
-                <select name="municipality_id" id="schoolMunicipality" class="form-select" required onchange="filterEditSchoolDistricts(true)">
+                <select name="municipality_id" id="schoolMunicipality" class="form-select" required onchange="handleEditSchoolMunicipalityChange()">
                     <option value="">Select municipality…</option>
                     <?php foreach ($municipalities as $municipalityRow): ?>
                     <option value="<?= (int)$municipalityRow['id'] ?>"><?= clean($municipalityRow['municipality_name']) ?></option>
@@ -1436,6 +1460,17 @@ $schoolExportSuffix = $schoolExportQuery !== '' ? ('&' . $schoolExportQuery) : '
             <div class="form-group">
                 <label class="form-label required">District</label>
                 <select name="district_id" id="schoolDistrict" class="form-select" required data-selected=""><option value="">Select municipality first…</option></select>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Province</label>
+                <input type="text" class="form-input" value="Aurora" readonly aria-readonly="true">
+                <small class="text-muted">School addresses are limited to Aurora.</small>
+            </div>
+            <div class="form-group">
+                <label class="form-label required" for="schoolBarangay">Barangay</label>
+                <select name="barangay_psgc_code" id="schoolBarangay" class="form-select" required data-selected-code=""><option value="">Select municipality first…</option></select>
+                <input type="hidden" name="barangay" id="schoolBarangayName" value="">
+                <small class="text-muted" id="schoolAddressStatus">Barangays load from the PSGC address service.</small>
             </div>
             </div>
             <div class="form-group"><label class="form-label required">Education Program <small class="text-muted">(select one or both)</small></label><div class="grade-checkbox-grid" style="grid-template-columns:repeat(2,minmax(220px,1fr));">
@@ -1480,7 +1515,32 @@ $schoolExportSuffix = $schoolExportQuery !== '' ? ('&' . $schoolExportQuery) : '
             <?php
             $setupHeadMode = (string)($setupFormData['head_mode'] ?? ((int)($setupSchool['school_head_teacher_id'] ?? 0) > 0 ? 'existing' : 'none'));
             $setupExistingHeadId = (int)($setupFormData['existing_school_head_id'] ?? ($setupSchool['school_head_teacher_id'] ?? 0));
+            $setupBarangay = (string)($setupFormData['barangay'] ?? ($setupSchool['barangay'] ?? ''));
+            $setupBarangayCode = (string)($setupFormData['barangay_psgc_code'] ?? ($setupSchool['barangay_psgc_code'] ?? ''));
             ?>
+            <div class="form-section" style="padding:16px;border:1px solid rgba(148,163,184,.24);border-radius:14px;margin-bottom:16px;">
+                <div class="section-header"><h3><i class="fas fa-location-dot"></i> School Address</h3></div>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label class="form-label">Municipality</label>
+                        <input type="text" class="form-input" value="<?= clean($setupSchool['municipality_name'] ?? '') ?>" readonly aria-readonly="true">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Province</label>
+                        <input type="text" class="form-input" value="Aurora" readonly aria-readonly="true">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label required" for="setupSchoolBarangay">Barangay</label>
+                        <select name="barangay_psgc_code" id="setupSchoolBarangay" class="form-select" required data-selected-code="<?= clean($setupBarangayCode) ?>">
+                            <?php if ($setupBarangayCode !== '' && $setupBarangay !== ''): ?>
+                            <option value="<?= clean($setupBarangayCode) ?>" data-name="<?= clean($setupBarangay) ?>" selected><?= clean($setupBarangay) ?></option>
+                            <?php else: ?><option value="">Loading barangays…</option><?php endif; ?>
+                        </select>
+                        <input type="hidden" name="barangay" id="setupSchoolBarangayName" value="<?= clean($setupBarangay) ?>">
+                        <small class="text-muted" id="setupSchoolAddressStatus">Barangays load from the PSGC address service.</small>
+                    </div>
+                </div>
+            </div>
             <div class="form-section" style="padding:16px;border:1px solid rgba(148,163,184,.24);border-radius:14px;margin-bottom:16px;">
                 <div class="section-header"><h3><i class="fas fa-user-tie"></i> School Head</h3></div>
                 <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:12px;">
@@ -1600,6 +1660,8 @@ const schoolFormDistrictSeed = <?= json_encode(array_map(static fn(array $distri
     'name' => (string)$district['district_name'],
     'municipality_id' => (int)$district['municipality_id'],
 ], $schoolFormDistricts), JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
+const schoolAddressOptionsUrl = <?= json_encode(APP_URL . '/actions/address_options.php', JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
+const setupAddressMunicipalityId = <?= (int)($setupSchool['municipality_id'] ?? 0) ?>;
 const shouldOpenAddSchool = <?= (!empty($addSchoolData) || ($_GET['open_add'] ?? '') === '1') ? 'true' : 'false' ?>;
 const editSchoolContext = <?= json_encode($editSchoolContext ? [
     'id' => (int)$editSchoolContext['id'],
@@ -1608,9 +1670,78 @@ const editSchoolContext = <?= json_encode($editSchoolContext ? [
     'municipality_id' => (int)($editSchoolContext['municipality_id'] ?? 0),
     'district_id' => (int)($editSchoolContext['district_id'] ?? 0),
     'sector' => (string)($editSchoolContext['sector'] ?? ''),
+    'barangay' => (string)($editSchoolContext['barangay'] ?? ''),
+    'barangay_psgc_code' => (string)($editSchoolContext['barangay_psgc_code'] ?? ''),
     'offerings' => $editSchoolContext['offerings'] ?? [],
 ] : null, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
 const quickTeacherFormSeed = <?= json_encode($setupFormData, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
+
+async function loadAuroraBarangays(municipalityId, selectId, nameInputId, statusId, clearSelection = false) {
+    const select = document.getElementById(selectId);
+    const nameInput = document.getElementById(nameInputId);
+    const status = document.getElementById(statusId);
+    if (!select || !nameInput) return;
+
+    const selectedCode = clearSelection ? '' : String(select.dataset.selectedCode || select.value || '');
+    const selectedName = clearSelection ? '' : String(nameInput.value || '');
+    if (!municipalityId) {
+        select.innerHTML = '<option value="">Select municipality first…</option>';
+        select.disabled = true;
+        select.dataset.selectedCode = '';
+        nameInput.value = '';
+        if (status) status.textContent = 'Select an Aurora municipality to load barangays.';
+        return;
+    }
+
+    const previousHtml = select.innerHTML;
+    select.disabled = true;
+    if (status) status.textContent = 'Loading official PSGC barangays…';
+    try {
+        const response = await fetch(schoolAddressOptionsUrl + '?municipality_id=' + encodeURIComponent(municipalityId), {
+            credentials: 'same-origin',
+            headers: { Accept: 'application/json' },
+        });
+        const payload = await response.json();
+        if (!response.ok || payload.ok !== true || !Array.isArray(payload.barangays)) {
+            throw new Error(payload.message || 'Unable to load barangays.');
+        }
+
+        select.innerHTML = '<option value="">Select barangay…</option>';
+        payload.barangays.forEach((barangay) => {
+            const option = document.createElement('option');
+            option.value = String(barangay.code || '');
+            option.textContent = String(barangay.name || '');
+            option.dataset.name = String(barangay.name || '');
+            if (option.value === selectedCode) option.selected = true;
+            select.appendChild(option);
+        });
+        select.disabled = false;
+        select.dataset.selectedCode = '';
+        const selectedOption = select.options[select.selectedIndex];
+        nameInput.value = selectedOption?.value ? String(selectedOption.dataset.name || selectedName) : '';
+        if (status) status.textContent = 'Official PSGC barangays for ' + payload.municipality.name + ', Aurora.';
+    } catch (error) {
+        select.innerHTML = previousHtml;
+        select.disabled = !select.value;
+        if (status) status.textContent = error instanceof Error ? error.message + ' Retry by selecting the municipality again.' : 'Unable to load barangays.';
+    }
+    select.onchange = function () {
+        const option = select.options[select.selectedIndex];
+        nameInput.value = option?.value ? String(option.dataset.name || option.textContent || '') : '';
+    };
+}
+
+function handleAddSchoolMunicipalityChange() {
+    filterAddSchoolDistricts(true);
+    const municipalityId = Number(document.getElementById('addSchoolMunicipality')?.value || 0);
+    loadAuroraBarangays(municipalityId, 'addSchoolBarangay', 'addSchoolBarangayName', 'addSchoolAddressStatus', true);
+}
+
+function handleEditSchoolMunicipalityChange() {
+    filterEditSchoolDistricts(true);
+    const municipalityId = Number(document.getElementById('schoolMunicipality')?.value || 0);
+    loadAuroraBarangays(municipalityId, 'schoolBarangay', 'schoolBarangayName', 'schoolAddressStatus', true);
+}
 
 function filterAddSchoolDistricts(preserveSelection) {
     const municipality = document.getElementById('addSchoolMunicipality');
@@ -1709,6 +1840,13 @@ function openSchoolModal(resetForm = true) {
         if (district) district.dataset.selected = '';
     }
     filterAddSchoolDistricts(false);
+    loadAuroraBarangays(
+        Number(document.getElementById('addSchoolMunicipality')?.value || 0),
+        'addSchoolBarangay',
+        'addSchoolBarangayName',
+        'addSchoolAddressStatus',
+        resetForm
+    );
     toggleAddSchoolPrograms();
     document.getElementById('addSchoolModal').style.display = 'flex';
 }
@@ -1725,6 +1863,13 @@ function editSchool(school) {
     document.getElementById('schoolMunicipality').value = String(school.municipality_id || '');
     document.getElementById('schoolDistrict').dataset.selected = String(school.district_id || '');
     filterEditSchoolDistricts(false);
+    const barangaySelect = document.getElementById('schoolBarangay');
+    barangaySelect.dataset.selectedCode = school.barangay_psgc_code || '';
+    barangaySelect.innerHTML = school.barangay_psgc_code && school.barangay
+        ? '<option value="' + escapeQuickTeacherValue(school.barangay_psgc_code) + '" data-name="' + escapeQuickTeacherValue(school.barangay) + '" selected>' + escapeQuickTeacherValue(school.barangay) + '</option>'
+        : '<option value="">Loading barangays…</option>';
+    document.getElementById('schoolBarangayName').value = school.barangay || '';
+    loadAuroraBarangays(Number(school.municipality_id || 0), 'schoolBarangay', 'schoolBarangayName', 'schoolAddressStatus', false);
     document.querySelector('[data-edit-education-program="formal"]').checked = [...offerings].some((code) => formalCodes.has(code));
     document.querySelector('[data-edit-education-program="als"]').checked = [...offerings].some((code) => alsCodes.has(code));
     document.querySelectorAll('[data-edit-formal-offering],[data-edit-als-offering]').forEach((input) => { input.checked = offerings.has(input.value); });
@@ -1852,6 +1997,7 @@ document.addEventListener('DOMContentLoaded', function () {
     if (shouldOpenAddSchool) openSchoolModal(false);
     if (editSchoolContext) editSchool(editSchoolContext);
     if (document.getElementById('schoolSetupModal')) {
+        loadAuroraBarangays(setupAddressMunicipalityId, 'setupSchoolBarangay', 'setupSchoolBarangayName', 'setupSchoolAddressStatus', false);
         initializeAutomaticCurrentClasses();
         toggleSchoolHeadMode();
         initializeQuickTeacherRows();

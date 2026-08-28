@@ -17,6 +17,7 @@ if (!in_array($format, ['csv', 'excel'], true)) {
 $db = getDB();
 ensureArchiveSchema($db);
 requireDatabaseStructure($db, [
+    'schools' => ['barangay', 'province'],
     'teacher_clc_assignments' => ['teacher_id', 'clc_school_id', 'assignment_status'],
 ]);
 
@@ -201,6 +202,7 @@ $sql = 'SELECT
             s.school_name,
             s.school_id_code,
             s.municipality,
+            CONCAT_WS(", ", NULLIF(TRIM(s.barangay), ""), NULLIF(TRIM(s.municipality), ""), NULLIF(TRIM(s.province), "")) AS school_address,
             COALESCE(d.district_name, "") AS district,
             COALESCE(NULLIF(s.institution_classification, ""), s.school_type, "") AS school_type,
             COALESCE(s.als_subtype, "") AS als_subtype,
@@ -235,8 +237,8 @@ logActivity(
     ], JSON_UNESCAPED_UNICODE)
 );
 
-$headers = ['School Name', 'School ID Code', 'Municipality', 'District', 'School Type', 'ALS Subtype', 'Teachers', 'Learners'];
-$colKeys = ['school_name', 'school_id_code', 'municipality', 'district', 'school_type', 'als_subtype', 'teachers', 'learners'];
+$headers = ['School Name', 'School ID Code', 'Municipality', 'School Address', 'District', 'School Type', 'ALS Subtype', 'Teachers', 'Learners'];
+$colKeys = ['school_name', 'school_id_code', 'municipality', 'school_address', 'district', 'school_type', 'als_subtype', 'teachers', 'learners'];
 
 $filename = 'TPMS_Schools_Export_' . date('Ymd_His');
 

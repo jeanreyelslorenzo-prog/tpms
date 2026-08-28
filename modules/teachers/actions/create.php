@@ -8,6 +8,8 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') redirect(APP_URL . '/add_teacher.php'
 verifyCsrf();
 $db = getDB();
 requireDatabaseStructure($db, [
+    'municipalities' => ['id', 'municipality_name', 'province_name'],
+    'teachers' => ['barangay', 'barangay_psgc_code', 'municipality', 'municipality_psgc_code', 'province', 'province_psgc_code'],
     'teacher_clc_assignments' => ['teacher_id', 'clc_school_id', 'school_year', 'is_primary', 'assignment_status'],
     'als_teacher_assignments' => ['teacher_id', 'start_school_year', 'end_school_year', 'assignment_status'],
     'als_teacher_assignment_clcs' => ['assignment_id', 'clc_school_id', 'is_primary'],
@@ -15,7 +17,8 @@ requireDatabaseStructure($db, [
 
 $fields = [
     'school_id_code_raw', 'employee_number', 'last_name', 'first_name', 'middle_name',
-    'extension_name', 'house_street', 'barangay', 'municipality', 'province',
+    'extension_name', 'barangay', 'municipality', 'province',
+    'barangay_psgc_code', 'municipality_psgc_code', 'province_psgc_code',
     'birthdate', 'gender', 'civil_status', 'pwd_status', 'contact_number', 'email_address',
     'position', 'item_number', 'salary_grade', 'appointment_type', 'original_appointment_date',
     'school_id', 'school_name_raw', 'plantilla_station', 'district_raw',
@@ -32,6 +35,7 @@ if ($mappedSalaryGrade !== null) {
 
 $selectedDistrictId = max(0, (int)($_POST['district_id'] ?? 0));
 $selectedSchoolId = max(0, (int)($data['school_id'] ?? 0));
+$addressMunicipalityId = max(0, (int)($_POST['municipality_id'] ?? 0));
 $matchedSchool = resolveSchoolFromTeacherData($db, $data);
 if ($matchedSchool && (int)$matchedSchool['id'] === $selectedSchoolId) {
     $data['school_id'] = (int)$matchedSchool['id'];
@@ -56,6 +60,23 @@ if ($selectedSchoolId <= 0 || !$matchedSchool) {
     $errors['school_id'] = 'Select a valid school station.';
 } elseif ((int)($matchedSchool['district_id'] ?? 0) !== $selectedDistrictId) {
     $errors['school_id'] = 'Select a school station from the chosen district.';
+}
+$addressValidation = validateAuroraAddress(
+    $db,
+    $addressMunicipalityId,
+    $data['barangay'],
+    $data['barangay_psgc_code']
+);
+if ($addressValidation['error'] !== null) {
+    $errors['address'] = $addressValidation['error'];
+} else {
+    $normalizedAddress = $addressValidation['address'];
+    $data['barangay'] = $normalizedAddress['barangay'];
+    $data['barangay_psgc_code'] = $normalizedAddress['barangay_psgc_code'];
+    $data['municipality'] = $normalizedAddress['municipality'];
+    $data['municipality_psgc_code'] = $normalizedAddress['municipality_psgc_code'];
+    $data['province'] = $normalizedAddress['province'];
+    $data['province_psgc_code'] = $normalizedAddress['province_psgc_code'];
 }
 $errors = array_merge($errors, validateTeacherInputFields($data));
 if ($data['employee_number'] !== '') {
@@ -82,6 +103,7 @@ $assignment = validateTeacherClcSelection(
 $errors = array_merge($errors, $assignment['errors']);
 $formData = $data;
 $formData['district_id'] = $selectedDistrictId;
+$formData['municipality_id'] = $addressMunicipalityId;
 $formData['als_clc_ids'] = $assignment['ids'];
 $formData['als_school_year'] = $assignment['school_year'];
 $formData['primary_clc_id'] = $assignment['primary_id'];

@@ -60,6 +60,11 @@ CREATE TABLE IF NOT EXISTS schools (
     school_id_code  VARCHAR(50)  DEFAULT NULL,
     municipality    VARCHAR(100) DEFAULT NULL,
     municipality_id INT UNSIGNED DEFAULT NULL,
+    barangay        VARCHAR(100) DEFAULT NULL,
+    barangay_psgc_code VARCHAR(10) DEFAULT NULL,
+    municipality_psgc_code VARCHAR(10) DEFAULT NULL,
+    province        VARCHAR(100) NOT NULL DEFAULT 'Aurora',
+    province_psgc_code VARCHAR(10) NOT NULL DEFAULT '0307700000',
     sector           VARCHAR(20)  DEFAULT NULL,
     school_category  VARCHAR(20)  DEFAULT NULL,
     offers_formal_education TINYINT(1) NOT NULL DEFAULT 0,
@@ -85,6 +90,7 @@ CREATE TABLE IF NOT EXISTS schools (
     INDEX idx_school_code  (school_id_code),
     INDEX idx_municipality (municipality),
     INDEX idx_school_municipality_id (municipality_id),
+    INDEX idx_school_barangay_psgc (barangay_psgc_code),
     INDEX idx_school_sector (sector),
     INDEX idx_school_category (school_category),
     INDEX idx_school_offers_formal (offers_formal_education),
@@ -107,8 +113,11 @@ CREATE TABLE IF NOT EXISTS teachers (
     extension_name              VARCHAR(20)  DEFAULT NULL,
     house_street                VARCHAR(255) DEFAULT NULL,
     barangay                    VARCHAR(100) DEFAULT NULL,
+    barangay_psgc_code          VARCHAR(10) DEFAULT NULL,
     municipality                VARCHAR(100) DEFAULT NULL,
+    municipality_psgc_code      VARCHAR(10) DEFAULT NULL,
     province                    VARCHAR(100) DEFAULT NULL,
+    province_psgc_code          VARCHAR(10) DEFAULT NULL,
     birthdate                   DATE         DEFAULT NULL,
     gender                      ENUM('Male','Female') DEFAULT NULL,
     civil_status                VARCHAR(30)  DEFAULT NULL,
@@ -382,7 +391,8 @@ INSERT IGNORE INTO schema_migrations (version) VALUES
     ('004_formal_als_programs'),
     ('005_als_teacher_clc_assignments'),
     ('007_als_assignment_periods'),
-    ('008_eps_vr_role');
+    ('008_eps_vr_role'),
+    ('009_school_address');
 
 -- Circular school-head relationship is added after both tables exist.
 ALTER TABLE schools

@@ -12,6 +12,8 @@ requireDatabaseStructure($db, [
     'schools' => [
         'municipality_id', 'sector', 'school_category', 'offers_formal_education',
         'offers_als', 'institution_classification', 'school_head_teacher_id',
+        'barangay', 'barangay_psgc_code', 'municipality_psgc_code',
+        'province', 'province_psgc_code',
     ],
     'school_curricular_offerings' => ['school_id', 'offering_code'],
     'school_level_statistics' => ['school_id', 'level_code', 'learner_count', 'class_count'],
@@ -161,6 +163,12 @@ $categoryKey = strtolower(trim((string)($school['school_category'] ?? '')));
 $categoryLabel = SCHOOL_CATEGORIES[$categoryKey] ?? ($programProfile['category'] !== ''
     ? (SCHOOL_CATEGORIES[$programProfile['category']] ?? $programProfile['classification'])
     : 'Not set');
+$schoolAddressParts = array_values(array_filter([
+    trim((string)($school['barangay'] ?? '')),
+    trim((string)($school['municipality_name'] ?? '')),
+    trim((string)($school['province'] ?? 'Aurora')),
+], static fn(string $part): bool => $part !== ''));
+$schoolAddressLabel = $schoolAddressParts ? implode(', ', $schoolAddressParts) : '—';
 $planningUrl = APP_URL . '/requirement_planning.php?school=' . urlencode(encryptId($schoolId));
 ?>
 
@@ -240,6 +248,7 @@ $planningUrl = APP_URL . '/requirement_planning.php?school=' . urlencode(encrypt
                     <div class="dl-row"><dt>Sector</dt><dd><?= clean($sectorLabel) ?></dd></div>
                     <div class="dl-row"><dt>Municipality</dt><dd><?= clean($school['municipality_name'] ?: '—') ?></dd></div>
                     <div class="dl-row"><dt>District</dt><dd><?= clean($school['district_name'] ?: '—') ?></dd></div>
+                    <div class="dl-row"><dt>School Address</dt><dd><?= clean($schoolAddressLabel) ?></dd></div>
                     <div class="dl-row"><dt>Education Program</dt><dd><?= clean($categoryLabel) ?></dd></div>
                     <div class="dl-row"><dt>Classification</dt><dd><?= clean($classification) ?></dd></div>
             </dl>
@@ -321,7 +330,6 @@ $planningUrl = APP_URL . '/requirement_planning.php?school=' . urlencode(encrypt
                 <?php foreach ($teachers as $teacher): ?>
                     <?php
                         $listAddressParts = array_filter([
-                            $teacher['house_street'] ?? '',
                             $teacher['barangay'] ?? '',
                             $teacher['municipality'] ?? '',
                             $teacher['province'] ?? '',
@@ -358,7 +366,6 @@ $planningUrl = APP_URL . '/requirement_planning.php?school=' . urlencode(encrypt
             <?php foreach ($teachers as $teacher): ?>
             <?php
                 $teacherAddressParts = array_filter([
-                    $teacher['house_street'] ?? '',
                     $teacher['barangay'] ?? '',
                     $teacher['municipality'] ?? '',
                     $teacher['province'] ?? '',

@@ -23,6 +23,8 @@ $data = [
     'school_id_code' => $postString('school_id_code'),
     'municipality_id' => (int)($_POST['municipality_id'] ?? 0),
     'district_id' => (int)($_POST['district_id'] ?? 0),
+    'barangay' => $postString('barangay'),
+    'barangay_psgc_code' => $postString('barangay_psgc_code'),
     'sector' => strtolower($postString('sector')),
     'education_programs' => is_array($_POST['education_programs'] ?? null)
         ? $_POST['education_programs']
@@ -83,11 +85,13 @@ if (($hasFormal || $hasAls) && !preg_match('/^\d{' . $requiredCodeLength . '}$/'
 
 $db = getDB();
 requireDatabaseStructure($db, [
-    'municipalities' => ['id', 'municipality_name'],
+    'municipalities' => ['id', 'municipality_name', 'province_name'],
     'districts' => ['id', 'municipality_id'],
     'schools' => [
         'municipality_id', 'sector', 'school_category', 'offers_formal_education',
         'offers_als', 'institution_classification', 'learner_count', 'total_sections',
+        'barangay', 'barangay_psgc_code', 'municipality_psgc_code',
+        'province', 'province_psgc_code',
     ],
     'school_curricular_offerings' => ['school_id', 'offering_code'],
 ]);
@@ -101,6 +105,21 @@ if ($data['municipality_id'] <= 0) {
     $municipality = $municipalityStmt->fetch();
     if (!$municipality) {
         $errors['municipality_id'] = 'The selected municipality is invalid.';
+    }
+}
+
+$normalizedAddress = null;
+if ($data['municipality_id'] > 0) {
+    $addressValidation = validateAuroraAddress(
+        $db,
+        $data['municipality_id'],
+        $data['barangay'],
+        $data['barangay_psgc_code']
+    );
+    if ($addressValidation['error'] !== null) {
+        $errors['address'] = $addressValidation['error'];
+    } else {
+        $normalizedAddress = $addressValidation['address'];
     }
 }
 
@@ -138,8 +157,9 @@ try {
         'INSERT INTO schools
          (school_name, school_id_code, municipality, municipality_id, sector, school_category,
           offers_formal_education, offers_als, institution_classification, school_type,
-          als_subtype, district_id, learner_count, total_sections)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0)'
+          als_subtype, district_id, barangay, barangay_psgc_code,
+          municipality_psgc_code, province, province_psgc_code, learner_count, total_sections)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0)'
     );
     $insert->execute([
         $data['school_name'],
@@ -154,6 +174,11 @@ try {
         $legacyType,
         $alsSubtype,
         $data['district_id'],
+        $normalizedAddress['barangay'],
+        $normalizedAddress['barangay_psgc_code'],
+        $normalizedAddress['municipality_psgc_code'],
+        $normalizedAddress['province'],
+        $normalizedAddress['province_psgc_code'],
     ]);
     $schoolId = (int)$db->lastInsertId();
 

@@ -8,6 +8,146 @@ function clean(mixed $val): string {
     return htmlspecialchars(trim((string)$val), ENT_QUOTES, 'UTF-8');
 }
 
+/** Aurora municipality names keyed by their official 10-digit PSGC codes. */
+function auroraPsgcMunicipalities(): array {
+    return [
+        'baler' => '0307701000',
+        'casiguran' => '0307702000',
+        'dilasag' => '0307703000',
+        'dinalungan' => '0307704000',
+        'dingalan' => '0307705000',
+        'dipaculao' => '0307706000',
+        'maria aurora' => '0307707000',
+        'san luis' => '0307708000',
+    ];
+}
+
+function auroraPsgcMunicipalityCode(string $municipalityName): ?string {
+    $key = strtolower(trim((string)preg_replace('/\s+/u', ' ', $municipalityName)));
+    return auroraPsgcMunicipalities()[$key] ?? null;
+}
+
+/**
+ * Load official barangays from the PSGC Cloud API and cache them in the user's session.
+ * Only the fixed Aurora municipality allowlist can reach the upstream service.
+ *
+ * @return array<int,array{code:string,name:string}>|null Null means the upstream service was unavailable.
+ */
+function fetchAuroraBarangaysFromApi(string $municipalityCode): ?array {
+    if (!in_array($municipalityCode, auroraPsgcMunicipalities(), true)) return [];
+
+    $cacheKey = 'aurora_psgc_' . $municipalityCode;
+    $cached = $_SESSION['tpms_address_api_cache'][$cacheKey] ?? null;
+    if (is_array($cached)
+        && (int)($cached['expires_at'] ?? 0) >= time()
+        && is_array($cached['barangays'] ?? null)) {
+        return $cached['barangays'];
+    }
+
+    $url = 'https://psgc.cloud/api/v2/cities-municipalities/' . rawurlencode($municipalityCode) . '/barangays';
+    $body = false;
+    if (function_exists('curl_init')) {
+        $curl = curl_init($url);
+        curl_setopt_array($curl, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_CONNECTTIMEOUT => 3,
+            CURLOPT_TIMEOUT => 6,
+            CURLOPT_FOLLOWLOCATION => false,
+            CURLOPT_HTTPHEADER => ['Accept: application/json'],
+            CURLOPT_USERAGENT => 'TalaGuro-TPMS/1.0',
+        ]);
+        $body = curl_exec($curl);
+        $status = (int)curl_getinfo($curl, CURLINFO_RESPONSE_CODE);
+        curl_close($curl);
+        if ($status !== 200) $body = false;
+    } elseif ((bool)ini_get('allow_url_fopen')) {
+        $context = stream_context_create(['http' => [
+            'method' => 'GET',
+            'timeout' => 6,
+            'ignore_errors' => true,
+            'header' => "Accept: application/json\r\nUser-Agent: TalaGuro-TPMS/1.0\r\n",
+        ]]);
+        $body = @file_get_contents($url, false, $context);
+    }
+    if (!is_string($body) || $body === '') return null;
+
+    $decoded = json_decode($body, true);
+    if (!is_array($decoded) || !is_array($decoded['data'] ?? null)) return null;
+
+    $prefix = substr($municipalityCode, 0, 7);
+    $barangays = [];
+    foreach ($decoded['data'] as $row) {
+        $code = trim((string)($row['code'] ?? ''));
+        $name = trim((string)($row['name'] ?? ''));
+        if ($name === '' || !preg_match('/^\d{10}$/', $code) || !str_starts_with($code, $prefix)) continue;
+        $barangays[] = ['code' => $code, 'name' => $name];
+    }
+    if (!$barangays) return null;
+
+    usort($barangays, static fn(array $a, array $b): int => strnatcasecmp($a['name'], $b['name']));
+    $_SESSION['tpms_address_api_cache'][$cacheKey] = [
+        'expires_at' => time() + 86400,
+        'barangays' => $barangays,
+    ];
+    return $barangays;
+}
+
+/**
+ * Validate and normalize a structured address against the selected Aurora municipality.
+ *
+ * @return array{address:?array,error:?string}
+ */
+function validateAuroraAddress(
+    PDO $db,
+    int $municipalityId,
+    string $barangayName,
+    string $barangayCode
+): array {
+    $barangayName = trim((string)preg_replace('/\s+/u', ' ', $barangayName));
+    $barangayCode = trim($barangayCode);
+
+    if ($barangayName === '' || mb_strlen($barangayName) > 100 || !preg_match('/^\d{10}$/', $barangayCode)) {
+        return ['address' => null, 'error' => 'Select a valid barangay from the address list.'];
+    }
+
+    $stmt = $db->prepare('SELECT municipality_name, province_name FROM municipalities WHERE id = ? LIMIT 1');
+    $stmt->execute([$municipalityId]);
+    $municipality = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$municipality || strcasecmp(trim((string)$municipality['province_name']), 'Aurora') !== 0) {
+        return ['address' => null, 'error' => 'Addresses are limited to Aurora province.'];
+    }
+
+    $municipalityName = trim((string)$municipality['municipality_name']);
+    $municipalityCode = auroraPsgcMunicipalityCode($municipalityName);
+    if ($municipalityCode === null || !str_starts_with($barangayCode, substr($municipalityCode, 0, 7))) {
+        return ['address' => null, 'error' => 'The selected barangay does not belong to that Aurora municipality.'];
+    }
+
+    $barangays = fetchAuroraBarangaysFromApi($municipalityCode);
+    if ($barangays === null) {
+        return ['address' => null, 'error' => 'The PSGC address service is temporarily unavailable. Please retry the barangay lookup.'];
+    }
+    $officialName = null;
+    foreach ($barangays as $barangay) {
+        if (hash_equals($barangay['code'], $barangayCode)) {
+            $officialName = $barangay['name'];
+            break;
+        }
+    }
+    if ($officialName === null || strcasecmp($officialName, $barangayName) !== 0) {
+        return ['address' => null, 'error' => 'Select a valid barangay from the address list.'];
+    }
+
+    return ['address' => [
+        'barangay' => $officialName,
+        'barangay_psgc_code' => $barangayCode,
+        'municipality' => $municipalityName,
+        'municipality_psgc_code' => $municipalityCode,
+        'province' => 'Aurora',
+        'province_psgc_code' => '0307700000',
+    ], 'error' => null];
+}
+
 /** Return the configured salary grade for a controlled teacher designation. */
 function teacherSalaryGradeForPosition(?string $position): ?string {
     $position = trim((string)$position);

@@ -147,7 +147,7 @@ $data = $db->prepare(
             t.gender, t.birthdate, t.position, t.appointment_type,
             t.grade_level, t.specialization, t.highest_education,
             t.csee_eligibility, t.data_privacy_consent,
-            t.house_street, t.barangay, t.municipality, t.province,
+            t.barangay, t.municipality, t.province,
             s.school_name, COALESCE(NULLIF(t.district_raw, ''), d.district_name) AS district,
             (SELECT GROUP_CONCAT(
                         CONCAT(sc_clc.school_name, ' [', tca_list.school_year,
@@ -471,7 +471,6 @@ $buildReportUrl = function(array $overrides = []) use ($search, $filterDist, $fi
                 <td>
                     <?php
                     $addrParts = array_filter([
-                        $r['house_street'] ?? '',
                         $r['barangay'] ?? '',
                         $r['municipality'] ?? '',
                         $r['province'] ?? '',

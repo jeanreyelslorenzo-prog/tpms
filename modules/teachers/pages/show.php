@@ -157,11 +157,10 @@ foreach ($clcAssignments as $assignment) {
                 <div class="dl-row"><dt>PWD Status</dt><dd><?= clean($t['pwd_status'] ?? '—') ?></dd></div>
                 <div class="dl-row"><dt>Contact No.</dt><dd><?= clean($t['contact_number'] ?? '—') ?></dd></div>
                 <div class="dl-row"><dt>Email</dt><dd><?= clean($t['email_address'] ?? '—') ?></dd></div>
-                <?php if (!empty($t['house_street']) || !empty($t['barangay']) || !empty($t['municipality'])): ?>
+                <?php if (!empty($t['barangay']) || !empty($t['municipality'])): ?>
                 <div class="dl-row"><dt>Address</dt><dd>
                     <?php
                     $addrParts = array_filter([
-                        $t['house_street'] ?? '',
                         $t['barangay']     ?? '',
                         $t['municipality'] ?? '',
                         $t['province']     ?? '',
