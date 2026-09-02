@@ -17,6 +17,8 @@ if (!in_array($format, ['csv', 'excel'], true)) $format = 'csv';
 $db = getDB();
 ensureArchiveSchema($db);
 requireDatabaseStructure($db, [
+    'teachers' => ['education_program'],
+    'schools' => ['school_head_teacher_id'],
     'teacher_clc_assignments' => ['teacher_id', 'clc_school_id', 'assignment_status'],
 ]);
 
@@ -66,6 +68,8 @@ $filterPos    = trim($_GET['pos']    ?? '');
 $filterGender = trim($_GET['gen']    ?? '');
 $filterSpec   = trim($_GET['spec']   ?? '');
 $filterGrade  = trim($_GET['grade']  ?? '');
+$workforce    = strtolower(trim((string)($_GET['workforce'] ?? '')));
+if (!in_array($workforce, ['', 'formal', 'als'], true)) $workforce = '';
 
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {
     $queryParams = [
@@ -77,6 +81,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {
         'gen' => $filterGender,
         'spec' => $filterSpec,
         'grade' => $filterGrade,
+        'workforce' => $workforce,
     ];
     ?>
     <!DOCTYPE html>
@@ -134,6 +139,8 @@ $filterPos    = trim($_POST['pos']    ?? $filterPos);
 $filterGender = trim($_POST['gen']    ?? $filterGender);
 $filterSpec   = trim($_POST['spec']   ?? $filterSpec);
 $filterGrade  = trim($_POST['grade']  ?? $filterGrade);
+$workforce    = strtolower(trim((string)($_POST['workforce'] ?? $workforce)));
+if (!in_array($workforce, ['', 'formal', 'als'], true)) $workforce = '';
 
 $confirmPassword = (string)($_POST['confirm_password'] ?? '');
 if ($confirmPassword === '') {
@@ -152,6 +159,9 @@ if ($passwordHash === '' || !password_verify($confirmPassword, $passwordHash)) {
 
 $where  = [activeArchiveExclusion('teacher', 't.id')];
 $params = [];
+if ($workforce !== '') {
+    $where[] = instructionalTeacherPredicate('t', $workforce);
+}
 if ($scopedDistrictId > 0) {
     $where[] = '(s.district_id = ? OR EXISTS (
         SELECT 1 FROM teacher_clc_assignments tca_scope
@@ -224,6 +234,10 @@ $stmt = $db->prepare(
             END AS original_appointment_date,
             t.plantilla_station,
             t.grade_level, t.specialization, t.subjects,
+            CASE t.education_program
+                WHEN 'als' THEN 'Alternative Learning System (ALS)'
+                ELSE 'Formal Education'
+            END AS education_program,
             t.highest_education, t.field_of_study, t.csee_eligibility,
             CONCAT_WS(', ',
                 NULLIF(TRIM(COALESCE(t.barangay, '')), ''),
@@ -239,6 +253,7 @@ $stmt = $db->prepare(
                   FROM teacher_clc_assignments tca_list
                   INNER JOIN schools sc_clc ON sc_clc.id = tca_list.clc_school_id
                   WHERE tca_list.teacher_id = t.id
+                    AND t.education_program = 'als'
                     AND tca_list.assignment_status = 'Active') AS active_clc_assignments,
                  COALESCE(s.school_id_code, t.school_id_code_raw) AS school_id_code,
                  COALESCE(d.district_name, t.district_raw) AS district
@@ -263,6 +278,7 @@ logActivity(
         'gen' => $filterGender,
         'spec' => $filterSpec,
         'grade' => $filterGrade,
+        'workforce' => $workforce,
         'rows' => count($rows),
     ], JSON_UNESCAPED_UNICODE)
 );
@@ -271,7 +287,7 @@ $headers = [
     'School ID Code','Employee Number','Last Name','First Name','Middle Name','Extension Name',
     'Date of Birth','Gender','Civil Status','PWD Status',
     'Contact Number','Email Address',
-    'Position','Item Number','Salary Grade','Appointment Type','Original Appointment Date',
+    'Position','Teacher Program','Item Number','Salary Grade','Appointment Type','Original Appointment Date',
     'School Station','ALS CLC Assignments','Plantilla Station','District','Address','Grade Level','Current Teaching','Specialization',
     'Highest Education','Field of Study / Course','CSEE / Eligibility',
     'Data Privacy Consent'
@@ -281,7 +297,7 @@ $colKeys = [
     'school_id_code','employee_number','last_name','first_name','middle_name','extension_name',
     'birthdate','gender','civil_status','pwd_status',
     'contact_number','email_address',
-    'position','item_number','salary_grade','appointment_type','original_appointment_date',
+    'position','education_program','item_number','salary_grade','appointment_type','original_appointment_date',
     'school_name','active_clc_assignments','plantilla_station','district','address','grade_level','subjects','specialization',
     'highest_education','field_of_study','csee_eligibility',
     'data_privacy_consent'

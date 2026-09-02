@@ -73,7 +73,7 @@ $actions = $actionStmt->fetchAll(PDO::FETCH_COLUMN);
 ?>
 
 <div class="filter-bar glass-card">
-    <form method="GET" class="filter-form" style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;">
+    <form method="GET" class="filter-form" style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;" data-live-search-form>
         <select name="module" class="form-select" onchange="this.form.submit()">
             <option value="">All Modules</option>
             <?php foreach ($modules as $m): ?>
@@ -88,7 +88,7 @@ $actions = $actionStmt->fetchAll(PDO::FETCH_COLUMN);
             <?php endforeach; ?>
         </select>
 
-        <input type="text" name="q" class="form-input" placeholder="Search description..." value="<?= clean($q) ?>">
+        <input type="text" name="q" class="form-input" placeholder="Search description..." value="<?= clean($q) ?>" data-live-search-input autocomplete="off">
         <input type="date" name="from" class="form-input" value="<?= clean($fromDate) ?>">
         <input type="date" name="to" class="form-input" value="<?= clean($toDate) ?>">
 
@@ -99,6 +99,7 @@ $actions = $actionStmt->fetchAll(PDO::FETCH_COLUMN);
     </form>
 </div>
 
+<div data-live-search-results="my-activity">
 <div class="table-card glass-card">
     <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
         <h3 class="card-title"><i class="fas fa-user-clock"></i> My Activity Timeline</h3>
@@ -145,6 +146,7 @@ $actions = $actionStmt->fetchAll(PDO::FETCH_COLUMN);
 </div>
 
 <?= paginationLinks($pag, APP_URL . '/my_activity.php' . ($_SERVER['QUERY_STRING'] ? '?' . $_SERVER['QUERY_STRING'] : '')) ?>
+</div>
 
 <style>
 .log-pill {

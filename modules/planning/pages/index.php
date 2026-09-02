@@ -59,8 +59,7 @@ if ($plan && !empty($plan['teacher_rows'])) {
         if ($subjectsRaw === '') {
             continue;
         }
-        foreach (explode(',', $subjectsRaw) as $subjectPiece) {
-            $subjectLabel = trim($subjectPiece);
+        foreach (parseTeacherSubjects($subjectsRaw) as $subjectLabel) {
             if ($subjectLabel === '') {
                 continue;
             }
@@ -385,7 +384,7 @@ $topShortageSchools = array_slice($divisionSnapshot, 0, 8);
                     <tr><td>School Year</td><td><?= clean((string)($plan['school']['school_year'] ?: 'Not set')) ?></td></tr>
                     <tr><td>Total Students</td><td><?= number_format((int)$sum['total_students']) ?></td></tr>
                     <tr><td>Total Students Assigned To Teachers</td><td><?= number_format((int)($sum['used_students'] ?? 0)) ?></td></tr>
-                    <tr><td>Total Teachers</td><td><?= number_format((int)$sum['total_teachers']) ?></td></tr>
+                    <tr><td>Formal Teachers</td><td><?= number_format((int)$sum['total_teachers']) ?></td></tr>
                     <tr><td>Student-Teacher Ratio</td><td><?= $sum['student_teacher_ratio_actual'] !== null ? clean((string)$sum['student_teacher_ratio_actual']) . ':1' : 'N/A' ?></td></tr>
                     <tr><td>Total Sections</td><td><?= number_format((int)$sum['total_sections']) ?></td></tr>
                     <tr><td>Required Classes</td><td><?= number_format((int)$sum['required_classes']) ?></td></tr>

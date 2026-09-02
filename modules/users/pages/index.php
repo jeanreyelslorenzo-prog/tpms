@@ -242,10 +242,10 @@ function getRoleBadgeWithColor($role) {
 <div class="filter-bar glass-card">
     <div style="display: flex; align-items: center; gap: 12px; flex: 1; flex-wrap: wrap;">
         <div class="topbar-title" style="white-space: nowrap;">Manage System Users</div>
-        <form method="GET" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex:1;min-width:260px;">
+        <form method="GET" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex:1;min-width:260px;" data-live-search-form>
             <div class="search-box" style="flex: 1; min-width: 200px;">
                 <i class="fas fa-search search-icon"></i>
-                <input type="text" name="q" class="form-input" placeholder="Search users…" value="<?= clean($search) ?>">
+                <input type="text" name="q" class="form-input" placeholder="Search users…" value="<?= clean($search) ?>" data-live-search-input autocomplete="off">
             </div>
             <button type="submit" class="btn btn-ghost btn-sm"><i class="fas fa-search"></i></button>
             <?php if ($search !== ''): ?>
@@ -266,6 +266,7 @@ function getRoleBadgeWithColor($role) {
     </div>
 </div>
 
+<div data-live-search-results="users">
 <!-- ── List View ──────────────────────────────────────────────── -->
 <div class="table-card glass-card" id="usersListView">
     <div class="table-scroll">
@@ -421,6 +422,7 @@ function getRoleBadgeWithColor($role) {
         <p>No users found.</p>
     </div>
     <?php endif; ?>
+</div>
 </div>
 
 <!-- ── Add/Edit User Modal ──────────────────────────────────── -->

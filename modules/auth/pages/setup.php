@@ -174,6 +174,7 @@ $statements = [
         appointment_type            VARCHAR(50)  DEFAULT NULL,
         original_appointment_date   DATE         DEFAULT NULL,
         school_id                   INT UNSIGNED DEFAULT NULL,
+        education_program           ENUM('formal','als') NOT NULL DEFAULT 'formal',
         school_id_code_raw          VARCHAR(50)  DEFAULT NULL,
         school_name_raw             VARCHAR(255) DEFAULT NULL,
         district_raw                VARCHAR(100) DEFAULT NULL,
@@ -203,6 +204,7 @@ $statements = [
         INDEX idx_gender           (gender),
         INDEX idx_position         (position),
         INDEX idx_school_id        (school_id),
+        INDEX idx_education_program (education_program),
         INDEX idx_specialization   (specialization),
         INDEX idx_birthdate        (birthdate),
         INDEX idx_appointment_type (appointment_type),
@@ -380,7 +382,7 @@ $seeds = [
     "INSERT IGNORE INTO districts (id, district_name, municipality_id) VALUES
         (1,'Baler',1),(2,'Casiguran',2),(3,'Dilasag',3),(4,'Dinalungan',4),(5,'Dingalan',5),
         (6,'Dipaculao North',6),(7,'Dipaculao South',6),(8,'Maria Aurora East',7),(9,'Maria Aurora West',7),(10,'San Luis',8)",
-    "INSERT IGNORE INTO schema_migrations (version) VALUES ('001_baseline'),('002_schema_sync'),('003_school_profile_workflow'),('004_formal_als_programs'),('005_als_teacher_clc_assignments'),('007_als_assignment_periods'),('008_eps_vr_role'),('009_school_address')",
+    "INSERT IGNORE INTO schema_migrations (version) VALUES ('001_baseline'),('002_schema_sync'),('003_school_profile_workflow'),('004_formal_als_programs'),('005_als_teacher_clc_assignments'),('007_als_assignment_periods'),('008_eps_vr_role'),('009_school_address'),('011_teacher_education_program')",
     "INSERT IGNORE INTO planning_settings (id, max_students_per_class, max_classes_per_teacher, max_teaching_load_hours, recommended_student_teacher_ratio, utilization_threshold_pct, default_hours_per_class_week)
         VALUES (1, 45, 6, 30, 35, 90, 5)",
     "INSERT IGNORE INTO schools
@@ -452,6 +454,16 @@ if (isset($connectError)) {
                 }
             }
 
+            // Add the normalized applicant/substitute module after all referenced
+            // core tables exist. The migration is idempotent for fresh and upgraded installs.
+            executeSqlMigrationFile($db, BASE_PATH . '/database/migrations/010_teacher_applicant_substitutes.sql');
+            requireApplicantModuleSchema($db);
+            syncApplicantSpecializations($db);
+            $log[] = ['ok', 'Teacher applicant and substitute module verified.'];
+
+            executeSqlMigrationFile($db, BASE_PATH . '/database/migrations/011_teacher_education_program.sql');
+            $log[] = ['ok', 'Teacher education programs verified.'];
+
             // 3. Seeds
             foreach ($seeds as $sql) {
                 try {
@@ -479,7 +491,7 @@ if (isset($connectError)) {
             @file_put_contents(getSetupLockFilePath(), "Setup completed on " . date('c') . PHP_EOL, FILE_APPEND);
             $done = true;
 
-        } catch (PDOException $e) {
+        } catch (Throwable $e) {
             error_log('TPMS setup error: ' . $e->getMessage());
             $errors[] = 'Setup failed due to a database operation error. Check server logs for details.';
         }

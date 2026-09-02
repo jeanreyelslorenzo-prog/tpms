@@ -9,7 +9,8 @@ ensureTeacherPlanningSchema($db);
 ensureArchiveSchema($db);
 requireDatabaseStructure($db, [
     'municipalities' => ['id', 'municipality_name', 'province_name'],
-    'teachers' => ['barangay_psgc_code', 'municipality_psgc_code', 'province_psgc_code'],
+    'teachers' => ['education_program', 'barangay_psgc_code', 'municipality_psgc_code', 'province_psgc_code'],
+    'school_curricular_offerings' => ['school_id', 'offering_code'],
     'teacher_clc_assignments' => ['teacher_id', 'clc_school_id', 'school_year', 'is_primary', 'assignment_status'],
     'als_teacher_assignments' => ['teacher_id', 'start_school_year', 'end_school_year', 'assignment_status'],
     'als_teacher_assignment_clcs' => ['assignment_id', 'clc_school_id', 'is_primary'],
@@ -50,11 +51,23 @@ $stmt->execute([$id]);
 $teacher = $stmt->fetch();
 if (!$teacher) { flash('error', 'Teacher not found.'); redirect(APP_URL . '/teachers.php'); }
 
-$schools = $db->query('SELECT s.id, s.school_name, s.school_id_code, s.district_id, d.district_name AS district FROM schools s LEFT JOIN districts d ON s.district_id = d.id WHERE ' . activeArchiveExclusion('school', 's.id') . ' ORDER BY d.district_name, s.school_name')->fetchAll();
+$schools = $db->query(
+    "SELECT s.id, s.school_name, s.school_id_code, s.district_id, d.district_name AS district,
+            (SELECT GROUP_CONCAT(sco.offering_code ORDER BY sco.offering_code SEPARATOR ',')
+             FROM school_curricular_offerings sco WHERE sco.school_id = s.id) AS curricular_offerings
+     FROM schools s
+     LEFT JOIN districts d ON s.district_id = d.id
+     WHERE " . activeArchiveExclusion('school', 's.id') . '
+     ORDER BY d.district_name, s.school_name'
+)->fetchAll();
 $districts = $db->query('SELECT d.id, d.district_name FROM districts d WHERE ' . activeArchiveExclusion('district', 'd.id') . ' ORDER BY d.district_name')->fetchAll();
 $formState = pullFormState('teacher.update.' . $id);
 $errors  = $formState['errors'];
 $data    = $formState['data'] ? array_replace($teacher, $formState['data']) : $teacher;
+$selectedEducationProgram = trim((string)($data['education_program'] ?? 'formal'));
+if (!array_key_exists($selectedEducationProgram, teacherEducationPrograms())) {
+    $selectedEducationProgram = 'formal';
+}
 $addressMunicipalities = $db->query(
     "SELECT id, municipality_name FROM municipalities WHERE province_name = 'Aurora' ORDER BY municipality_name"
 )->fetchAll(PDO::FETCH_ASSOC);
@@ -116,10 +129,37 @@ if ($selectedDistrictId <= 0 && trim((string)($data['district_raw'] ?? '')) !== 
     }
 }
 
+$subjectOptions = teacherSubjectOptions();
+$subjectOfferingLabels = ['ELEMENTARY' => 'ES', 'JHS' => 'JHS', 'SHS' => 'SHS'];
+$selectedSchoolOfferings = [];
+foreach ($schools as $schoolOption) {
+    if ((int)($data['school_id'] ?? 0) !== (int)$schoolOption['id']) continue;
+    $selectedSchoolOfferings = normalizeTeacherSubjectOfferings(
+        explode(',', (string)($schoolOption['curricular_offerings'] ?? ''))
+    );
+    break;
+}
+$selectedSubjectValues = parseTeacherSubjects((string)($data['subjects'] ?? ''));
+$allowedSelectedSubjects = teacherSubjectsForOfferings($selectedSchoolOfferings);
+$selectedChecklistSubjects = array_values(array_intersect($selectedSubjectValues, $allowedSelectedSubjects));
+if ($allowedSelectedSubjects) {
+    $orderedSubjectOptions = [];
+    foreach ($allowedSelectedSubjects as $subject) {
+        $orderedSubjectOptions[$subject] = $subjectOptions[$subject];
+    }
+    foreach ($subjectOptions as $subject => $offerings) {
+        if (!isset($orderedSubjectOptions[$subject])) $orderedSubjectOptions[$subject] = $offerings;
+    }
+    $subjectOptions = $orderedSubjectOptions;
+}
+$legacySubjectValues = (int)($data['school_id'] ?? 0) === (int)($teacher['school_id'] ?? 0)
+    ? array_values(array_diff($selectedSubjectValues, $allowedSelectedSubjects))
+    : [];
+
 ?>
 
 <div class="form-page-wrap">
-<form method="POST" action="<?= APP_URL ?>/actions/update_teacher.php" enctype="multipart/form-data">
+<form method="POST" action="<?= APP_URL ?>/actions/update_teacher.php" enctype="multipart/form-data" id="teacherEditForm">
     <input type="hidden" name="csrf_token" value="<?= csrfToken() ?>">
     <input type="hidden" name="id" value="<?= $id ?>">
     <input type="hidden" name="school_context" value="<?= clean($schoolCtx > 0 ? encryptId($schoolCtx) : '') ?>">
@@ -152,13 +192,16 @@ if ($selectedDistrictId <= 0 && trim((string)($data['district_raw'] ?? '')) !== 
             ];
             $teacherTextLimits = ['employee_number'=>7,'last_name'=>60,'first_name'=>60,'middle_name'=>60,'extension_name'=>20,'contact_number'=>11,'email_address'=>150];
             foreach ($textFields as [$name, $label, $type, $req]):
+                $currentTextValue = (string)($data[$name] ?? '');
+                $allowsCurrentEmployeeNumber = $name === 'employee_number' && preg_match('/^\d{7}$/', $currentTextValue) !== 1;
+                $allowsCurrentContactNumber = $name === 'contact_number' && $currentTextValue !== '' && preg_match('/^09\d{9}$/', $currentTextValue) !== 1;
             ?>
             <div class="form-group">
                 <label class="form-label <?= $req ? 'required' : '' ?>"><?= $label ?></label>
                 <input type="<?= $type ?>" name="<?= $name ?>"
-                       maxlength="<?= (int)$teacherTextLimits[$name] ?>" <?= $req ? 'required' : '' ?>
-                       <?= $name === 'contact_number' ? 'inputmode="numeric" pattern="09[0-9]{9}" oninput="this.value=this.value.replace(/\D/g,\'\').slice(0,11)"' : '' ?>
-                       <?= $name === 'employee_number' ? 'inputmode="numeric" minlength="7" pattern="[0-9]{7}" oninput="this.value=this.value.replace(/\D/g,\'\').slice(0,7)"' : '' ?>
+                       maxlength="<?= max((int)$teacherTextLimits[$name], mb_strlen($currentTextValue)) ?>" <?= $req ? 'required' : '' ?>
+                       <?= $name === 'contact_number' ? 'inputmode="numeric" ' . ($allowsCurrentContactNumber ? '' : 'pattern="09[0-9]{9}" ') . 'oninput="this.value=this.value.replace(/\D/g,\'\').slice(0,11)"' : '' ?>
+                       <?= $name === 'employee_number' ? 'inputmode="numeric" ' . ($allowsCurrentEmployeeNumber ? '' : 'minlength="7" pattern="[0-9]{7}" ') . 'oninput="this.value=this.value.replace(/\D/g,\'\').slice(0,' . max(7, mb_strlen($currentTextValue)) . ')"' : '' ?>
                        <?= in_array($name, ['first_name', 'middle_name', 'last_name'], true) ? 'data-person-name pattern="[\p{L}\p{M} -]+" title="Use letters, spaces, and hyphens only."' : '' ?>
                        class="form-input <?= isset($errors[$name]) ? 'is-invalid' : '' ?>"
                        value="<?= clean($data[$name] ?? '') ?>">
@@ -197,8 +240,12 @@ if ($selectedDistrictId <= 0 && trim((string)($data['district_raw'] ?? '')) !== 
             <div class="form-group">
                 <label class="form-label">Civil Status</label>
                 <select name="civil_status" class="form-select">
+                    <?php $currentCivilStatus = trim((string)($data['civil_status'] ?? '')); $civilStatusOptions = ['Single','Married','Widowed','Separated','Annulled']; ?>
                     <option value="">Select…</option>
-                    <?php foreach (['Single','Married','Widowed','Separated','Annulled'] as $cs): ?>
+                    <?php if ($currentCivilStatus !== '' && !in_array($currentCivilStatus, $civilStatusOptions, true)): ?>
+                    <option value="<?= clean($currentCivilStatus) ?>" selected><?= clean($currentCivilStatus) ?> (current legacy value)</option>
+                    <?php endif; ?>
+                    <?php foreach ($civilStatusOptions as $cs): ?>
                     <option value="<?= $cs ?>" <?= ($data['civil_status'] ?? '') === $cs ? 'selected' : '' ?>><?= $cs ?></option>
                     <?php endforeach; ?>
                 </select>
@@ -237,6 +284,9 @@ if ($selectedDistrictId <= 0 && trim((string)($data['district_raw'] ?? '')) !== 
                 <label class="form-label">Province</label>
                 <input type="text" class="form-input" value="Aurora" readonly aria-readonly="true">
             </div>
+            <div class="form-group" style="grid-column:1/-1">
+                <small class="text-muted">Distance is estimated from the selected PSGC barangay. Exact coordinates are not collected.</small>
+            </div>
             <?php if (isset($errors['address'])): ?><div class="form-error" style="grid-column:1/-1;"><?= clean($errors['address']) ?></div><?php endif; ?>
         </div>
     </div>
@@ -270,7 +320,8 @@ if ($selectedDistrictId <= 0 && trim((string)($data['district_raw'] ?? '')) !== 
             </div>
             <div class="form-group">
                 <label class="form-label">Item Number</label>
-                <input type="text" name="item_number" maxlength="20" pattern="[A-Za-z0-9-]{1,20}" placeholder="e.g. TCH1-12345-1234" class="form-input <?= isset($errors['item_number']) ? 'is-invalid' : '' ?>" value="<?= clean($data['item_number'] ?? '') ?>">
+                <?php $currentItemNumber = trim((string)($data['item_number'] ?? '')); $allowsCurrentItemNumber = $currentItemNumber !== '' && preg_match('/^[A-Za-z0-9-]{1,20}$/', $currentItemNumber) !== 1; ?>
+                <input type="text" name="item_number" maxlength="<?= max(20, mb_strlen($currentItemNumber)) ?>" <?= $allowsCurrentItemNumber ? '' : 'pattern="[A-Za-z0-9-]{1,20}"' ?> placeholder="e.g. TCH1-12345-1234" class="form-input <?= isset($errors['item_number']) ? 'is-invalid' : '' ?>" value="<?= clean($data['item_number'] ?? '') ?>">
                 <?php if (!empty($errors['item_number'])): ?><span class="form-error"><?= clean($errors['item_number']) ?></span><?php endif; ?>
             </div>
             <div class="form-group">
@@ -301,8 +352,12 @@ if ($selectedDistrictId <= 0 && trim((string)($data['district_raw'] ?? '')) !== 
             <div class="form-group">
                 <label class="form-label">Appointment Type</label>
                 <select name="appointment_type" class="form-select">
+                    <?php $currentAppointmentType = trim((string)($data['appointment_type'] ?? '')); $appointmentTypeOptions = ['Permanent','Provisional','Substitute','Casual','Contractual','Co-terminus']; ?>
                     <option value="">Select…</option>
-                    <?php foreach (['Permanent','Provisional','Substitute','Casual','Contractual','Co-terminus'] as $at): ?>
+                    <?php if ($currentAppointmentType !== '' && !in_array($currentAppointmentType, $appointmentTypeOptions, true)): ?>
+                    <option value="<?= clean($currentAppointmentType) ?>" selected><?= clean($currentAppointmentType) ?> (current legacy value)</option>
+                    <?php endif; ?>
+                    <?php foreach ($appointmentTypeOptions as $at): ?>
                     <option value="<?= $at ?>" <?= ($data['appointment_type'] ?? '') === $at ? 'selected' : '' ?>><?= $at ?></option>
                     <?php endforeach; ?>
                 </select>
@@ -322,7 +377,7 @@ if ($selectedDistrictId <= 0 && trim((string)($data['district_raw'] ?? '')) !== 
                 <select name="school_id" id="teacherSchoolEdit" class="form-select <?= isset($errors['school_id']) ? 'is-invalid' : '' ?>" required>
                     <option value="">Select school...</option>
                     <?php foreach ($schools as $sc): ?>
-                    <option value="<?= (int)$sc['id'] ?>" data-district-id="<?= (int)$sc['district_id'] ?>" data-school-code="<?= clean(preg_replace('/\D+/', '', (string)($sc['school_id_code'] ?? ''))) ?>" <?= ((int)($data['school_id'] ?? 0)) === (int)$sc['id'] ? 'selected' : '' ?>>
+                    <option value="<?= (int)$sc['id'] ?>" data-district-id="<?= (int)$sc['district_id'] ?>" data-school-code="<?= clean(preg_replace('/\D+/', '', (string)($sc['school_id_code'] ?? ''))) ?>" data-offerings="<?= clean($sc['curricular_offerings'] ?? '') ?>" <?= ((int)($data['school_id'] ?? 0)) === (int)$sc['id'] ? 'selected' : '' ?>>
                         <?= clean($sc['school_name']) ?><?= trim((string)($sc['school_id_code'] ?? '')) !== '' ? ' (' . clean($sc['school_id_code']) . ')' : '' ?>
                     </option>
                     <?php endforeach; ?>
@@ -340,16 +395,24 @@ if ($selectedDistrictId <= 0 && trim((string)($data['district_raw'] ?? '')) !== 
             </div>
             <div class="form-group">
                 <label class="form-label">Specialization / Major</label>
-                <select name="specialization" class="form-select <?= isset($errors['specialization']) ? 'is-invalid' : '' ?>"><option value="">Select specialization…</option><?php foreach (TEACHER_SPECIALIZATIONS as $specialization): ?><option value="<?= clean($specialization) ?>" <?= ($data['specialization'] ?? '') === $specialization ? 'selected' : '' ?>><?= clean($specialization) ?></option><?php endforeach; ?></select>
+                <?php $currentSpecialization = trim((string)($data['specialization'] ?? '')); ?>
+                <select name="specialization" class="form-select <?= isset($errors['specialization']) ? 'is-invalid' : '' ?>">
+                    <option value="">Select specialization…</option>
+                    <?php if ($currentSpecialization !== '' && !in_array($currentSpecialization, TEACHER_SPECIALIZATIONS, true)): ?>
+                    <option value="<?= clean($currentSpecialization) ?>" selected><?= clean($currentSpecialization) ?> (current legacy value)</option>
+                    <?php endif; ?>
+                    <?php foreach (TEACHER_SPECIALIZATIONS as $specialization): ?>
+                    <option value="<?= clean($specialization) ?>" <?= ($data['specialization'] ?? '') === $specialization ? 'selected' : '' ?>><?= clean($specialization) ?></option>
+                    <?php endforeach; ?>
+                </select>
                 <?php if (!empty($errors['specialization'])): ?><span class="form-error"><?= clean($errors['specialization']) ?></span><?php endif; ?>
             </div>
             <div class="form-group" style="grid-column:span 2">
-                <label class="form-label">Grade Level/s Taught</label>
+                <label class="form-label">Grade Level/s Currently Teaching</label>
                 <div class="grade-checkbox-grid">
                     <?php
                     $allLevels = ['Kindergarten','Grade 1','Grade 2','Grade 3','Grade 4','Grade 5','Grade 6',
-                                  'Grade 7','Grade 8','Grade 9','Grade 10','Grade 11','Grade 12',
-                                  'ELEM','JHS','SHS'];
+                                  'Grade 7','Grade 8','Grade 9','Grade 10','Grade 11','Grade 12'];
                     $selLevels = array_map('trim', explode(',', $data['grade_level'] ?? ''));
                     foreach ($allLevels as $lv): ?>
                     <label class="checkbox-label-sm">
@@ -365,12 +428,54 @@ if ($selectedDistrictId <= 0 && trim((string)($data['district_raw'] ?? '')) !== 
             </div>
             <div class="form-group" style="grid-column:span 2">
                 <label class="form-label">Subjects/s Taught</label>
-                <textarea name="subjects" maxlength="500" class="form-input" rows="2"><?= clean($data['subjects'] ?? '') ?></textarea>
+                <div id="teacherSubjectChecklist" class="grade-checkbox-grid" style="align-items:stretch">
+                    <?php foreach ($subjectOptions as $subject => $subjectOfferings): ?>
+                    <?php $subjectVisible = (bool)array_intersect($selectedSchoolOfferings, $subjectOfferings); ?>
+                    <label class="checkbox-label-sm" data-subject-option data-subject-offerings="<?= clean(implode(',', $subjectOfferings)) ?>" style="align-items:flex-start;<?= !$subjectVisible ? 'display:none' : '' ?>">
+                        <input type="checkbox" name="subjects_selected[]" value="<?= clean($subject) ?>" <?= in_array($subject, $selectedChecklistSubjects, true) ? 'checked' : '' ?> <?= !$subjectVisible ? 'disabled' : '' ?>>
+                        <span><strong><?= clean($subject) ?></strong><small class="text-muted" style="display:block;margin-top:.15rem"><?= clean(implode(' · ', array_map(static fn(string $offering): string => $subjectOfferingLabels[$offering] ?? $offering, $subjectOfferings))) ?></small></span>
+                    </label>
+                    <?php endforeach; ?>
+                </div>
+                <small id="teacherSubjectsHelp" class="text-muted" aria-live="polite" style="display:block;margin-top:.65rem"></small>
+                <?php if ($legacySubjectValues): ?>
+                <div id="teacherLegacySubjects" style="margin-top:.8rem;padding:.75rem;border:1px dashed var(--border-color);border-radius:10px">
+                    <small class="text-muted" style="display:block;margin-bottom:.55rem">Existing values outside this school's current checklist are retained unless unchecked.</small>
+                    <div class="grade-checkbox-grid">
+                        <?php foreach ($legacySubjectValues as $legacySubject): ?>
+                        <label class="checkbox-label-sm" style="align-items:flex-start">
+                            <input type="checkbox" name="subjects_legacy[]" value="<?= clean($legacySubject) ?>" data-legacy-subject checked>
+                            <span><?= clean($legacySubject) ?> <small class="text-muted">(legacy)</small></span>
+                        </label>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+                <?php endif; ?>
+                <?php if (!empty($errors['subjects'])): ?><span class="form-error"><?= clean($errors['subjects']) ?></span><?php endif; ?>
             </div>
         </div>
     </div>
 
     <div class="form-section glass-card">
+        <div class="section-header"><h3><i class="fas fa-chalkboard-teacher"></i> Teacher Program</h3></div>
+        <fieldset style="border:0;margin:0;padding:0 1.5rem 1.5rem">
+            <legend class="form-label required" style="margin-bottom:.75rem">Select the teacher's education program</legend>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:.85rem">
+                <label style="display:flex;align-items:flex-start;gap:.75rem;border:1px solid var(--border-color);border-radius:12px;padding:1rem;cursor:pointer">
+                    <input type="radio" name="education_program" value="formal" required aria-controls="teacherAlsClcSection" <?= $selectedEducationProgram === 'formal' ? 'checked' : '' ?>>
+                    <span><strong>Formal Education</strong><br><small class="text-muted">For regular K-12 or formal school teaching assignments.</small></span>
+                </label>
+                <label style="display:flex;align-items:flex-start;gap:.75rem;border:1px solid var(--border-color);border-radius:12px;padding:1rem;cursor:pointer">
+                    <input type="radio" name="education_program" value="als" required aria-controls="teacherAlsClcSection" <?= $selectedEducationProgram === 'als' ? 'checked' : '' ?>>
+                    <span><strong>Alternative Learning System (ALS)</strong><br><small class="text-muted">Shows the CLC assignment pane for ALS learning centers.</small></span>
+                </label>
+            </div>
+            <?php if (!empty($errors['education_program'])): ?><span class="form-error" style="display:block;margin-top:.65rem"><?= clean($errors['education_program']) ?></span><?php endif; ?>
+            <small id="teacherProgramHelp" class="text-muted" aria-live="polite" style="display:block;margin-top:.75rem"></small>
+        </fieldset>
+    </div>
+
+    <div class="form-section glass-card" id="teacherAlsClcSection" <?= $selectedEducationProgram !== 'als' ? 'hidden' : '' ?>>
         <div class="section-header"><h3><i class="fas fa-route"></i> ALS CLC Assignments</h3></div>
         <div style="padding:0 1.5rem 1.5rem;display:grid;gap:1rem">
             <p class="text-muted" style="margin:0">
@@ -416,8 +521,12 @@ if ($selectedDistrictId <= 0 && trim((string)($data['district_raw'] ?? '')) !== 
             <div class="form-group">
                 <label class="form-label">Highest Education</label>
                 <select name="highest_education" class="form-select">
+                    <?php $currentHighestEducation = trim((string)($data['highest_education'] ?? '')); $highestEducationOptions = ["Bachelor's Degree",'With Masteral Units',"Master's Degree",'With Doctoral Units','Doctorate Degree']; ?>
                     <option value="">Select…</option>
-                    <?php foreach (["Bachelor's Degree",'With Masteral Units',"Master's Degree",'With Doctoral Units','Doctorate Degree'] as $ed): ?>
+                    <?php if ($currentHighestEducation !== '' && !in_array($currentHighestEducation, $highestEducationOptions, true)): ?>
+                    <option value="<?= clean($currentHighestEducation) ?>" selected><?= clean($currentHighestEducation) ?> (current legacy value)</option>
+                    <?php endif; ?>
+                    <?php foreach ($highestEducationOptions as $ed): ?>
                     <option value="<?= $ed ?>" <?= ($data['highest_education'] ?? '') === $ed ? 'selected' : '' ?>><?= $ed ?></option>
                     <?php endforeach; ?>
                 </select>
@@ -455,11 +564,16 @@ if ($selectedDistrictId <= 0 && trim((string)($data['district_raw'] ?? '')) !== 
 <script src="<?= APP_URL ?>/assets/js/aurora-address.js"></script>
 <script>
 const teacherEntryLimits = <?= json_encode(['employee_number'=>7,'last_name'=>60,'first_name'=>60,'middle_name'=>60,'extension_name'=>10,'barangay'=>100,'municipality'=>100,'province'=>100,'contact_number'=>11,'email_address'=>150,'position'=>100,'item_number'=>20,'salary_grade'=>20,'plantilla_station'=>255,'subjects'=>500,'field_of_study'=>150,'csee_eligibility'=>150]) ?>;
-Object.entries(teacherEntryLimits).forEach(([name, limit]) => document.querySelectorAll(`[name="${name}"]`).forEach((field) => field.maxLength = limit));
+Object.entries(teacherEntryLimits).forEach(([name, limit]) => document.querySelectorAll(`[name="${name}"]`).forEach((field) => {
+    field.maxLength = Math.max(limit, [...String(field.value || '')].length);
+}));
 const teacherPositionSalaryGrades = <?= json_encode(TEACHER_POSITION_SALARY_GRADES, JSON_UNESCAPED_UNICODE) ?>;
 const teacherPositionMonthlySalaries = <?= json_encode(TEACHER_POSITION_MONTHLY_SALARIES, JSON_UNESCAPED_UNICODE) ?>;
 const initialTeacherPosition = <?= json_encode($currentPosition, JSON_UNESCAPED_UNICODE) ?>;
 const initialTeacherSalaryGrade = <?= json_encode((string)($data['salary_grade'] ?? ''), JSON_UNESCAPED_UNICODE) ?>;
+const teacherSubjectOfferingLabels = <?= json_encode($subjectOfferingLabels, JSON_UNESCAPED_UNICODE) ?>;
+const teacherSubjectsByOffering = <?= json_encode(TEACHER_SUBJECTS_BY_OFFERING, JSON_UNESCAPED_UNICODE) ?>;
+const initialTeacherSchoolId = <?= json_encode((string)(int)($teacher['school_id'] ?? 0)) ?>;
 initializeAuroraAddressPicker({
     endpoint: <?= json_encode(APP_URL . '/actions/address_options.php', JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>,
     municipalitySelectId: 'teacherMunicipalityEdit',
@@ -528,11 +642,75 @@ function syncTeacherSchoolCode() {
     schoolCode.value = selectedOption && selectedOption.value !== '' ? String(selectedOption.dataset.schoolCode || '').replace(/\D/g, '').slice(0, 8) : '';
 }
 
+function syncTeacherSubjectChecklist(clearUnavailable = false) {
+    const schoolSelect = document.getElementById('teacherSchoolEdit');
+    const help = document.getElementById('teacherSubjectsHelp');
+    if (!schoolSelect) return;
+    const selectedOption = schoolSelect.options[schoolSelect.selectedIndex];
+    const offerings = new Set(String(selectedOption?.dataset.offerings || '')
+        .split(',')
+        .map(value => value.trim().toUpperCase())
+        .map(value => value === 'KINDER' ? 'ELEMENTARY' : (value === 'ALS-SHS' ? 'SHS' : value))
+        .filter(value => Object.prototype.hasOwnProperty.call(teacherSubjectOfferingLabels, value)));
+    const checklist = document.getElementById('teacherSubjectChecklist');
+    const subjectItems = [...document.querySelectorAll('[data-subject-option]')];
+    const itemsBySubject = new Map(subjectItems.map(item => [item.querySelector('input[type="checkbox"]')?.value, item]));
+    const orderedSubjects = [];
+    Object.keys(teacherSubjectsByOffering).forEach(offering => {
+        if (!offerings.has(offering)) return;
+        teacherSubjectsByOffering[offering].forEach(subject => {
+            if (!orderedSubjects.includes(subject)) orderedSubjects.push(subject);
+        });
+    });
+    if (checklist) {
+        orderedSubjects.forEach(subject => {
+            const item = itemsBySubject.get(subject);
+            if (item) checklist.appendChild(item);
+        });
+        subjectItems.forEach(item => {
+            if (!orderedSubjects.includes(item.querySelector('input[type="checkbox"]')?.value)) checklist.appendChild(item);
+        });
+    }
+    let visibleCount = 0;
+    subjectItems.forEach(item => {
+        const subjectOfferings = String(item.dataset.subjectOfferings || '').split(',').filter(Boolean);
+        const supported = subjectOfferings.some(offering => offerings.has(offering));
+        const input = item.querySelector('input[type="checkbox"]');
+        item.style.display = supported ? '' : 'none';
+        if (input) {
+            input.disabled = !supported;
+            if (clearUnavailable && !supported) input.checked = false;
+        }
+        if (supported) visibleCount += 1;
+    });
+
+    const schoolChanged = String(selectedOption?.value || '') !== initialTeacherSchoolId;
+    const legacyPanel = document.getElementById('teacherLegacySubjects');
+    if (legacyPanel) {
+        legacyPanel.hidden = schoolChanged;
+        legacyPanel.querySelectorAll('[data-legacy-subject]').forEach(input => {
+            input.disabled = schoolChanged;
+        });
+    }
+    if (!help) return;
+    const offeringNames = [...offerings].map(offering => teacherSubjectOfferingLabels[offering]);
+    help.textContent = !selectedOption?.value
+        ? 'Select a School Station to load its subject checklist.'
+        : (visibleCount > 0
+            ? `Showing subjects for: ${offeringNames.join(', ')}.${schoolChanged && legacyPanel ? ' Legacy values are disabled because the school changed.' : ''}`
+            : 'The selected school has no Elementary, JHS, or SHS curricular offering.');
+}
+
 document.getElementById('teacherDistrictEdit')?.addEventListener('change', () => {
     filterTeacherSchoolStations('teacherDistrictEdit', 'teacherSchoolEdit');
+    syncTeacherSubjectChecklist(true);
 });
-document.getElementById('teacherSchoolEdit')?.addEventListener('change', syncTeacherSchoolCode);
+document.getElementById('teacherSchoolEdit')?.addEventListener('change', () => {
+    syncTeacherSchoolCode();
+    syncTeacherSubjectChecklist(true);
+});
 filterTeacherSchoolStations('teacherDistrictEdit', 'teacherSchoolEdit');
+syncTeacherSubjectChecklist(false);
 // @ts-nocheck
 function previewPhoto(input) {
     if (input.files && input.files[0]) {
@@ -544,12 +722,14 @@ function previewPhoto(input) {
         reader.readAsDataURL(input.files[0]);
     }
 }
-function syncGradeLevels() {
+function syncGradeLevels(preserveUnrecognizedInitialValue = false) {
     const checked = [...document.querySelectorAll('input[name="grade_levels[]"]:checked')]
                       .map(cb => cb.value);
-    document.getElementById('grade_level_hidden').value = checked.join(', ');
+    const hidden = document.getElementById('grade_level_hidden');
+    if (!hidden || (preserveUnrecognizedInitialValue && checked.length === 0 && hidden.value.trim() !== '')) return;
+    hidden.value = checked.join(', ');
 }
-syncGradeLevels();
+syncGradeLevels(true);
 
 function syncClcPrimaryRadios() {
     document.querySelectorAll('[data-clc-toggle]').forEach(toggle => {
@@ -560,7 +740,23 @@ function syncClcPrimaryRadios() {
     });
 }
 document.querySelectorAll('[data-clc-toggle]').forEach(toggle => toggle.addEventListener('change', syncClcPrimaryRadios));
-syncClcPrimaryRadios();
+
+function syncTeacherProgramPanel() {
+    const isAls = document.querySelector('input[name="education_program"]:checked')?.value === 'als';
+    const section = document.getElementById('teacherAlsClcSection');
+    const help = document.getElementById('teacherProgramHelp');
+    if (!section) return;
+    section.hidden = !isAls;
+    section.querySelectorAll('input, select, textarea').forEach(control => {
+        control.disabled = !isAls;
+    });
+    if (isAls) syncClcPrimaryRadios();
+    if (help) help.textContent = isAls
+        ? 'CLC assignments are available because this teacher is assigned to ALS.'
+        : 'Saving as Formal Education will close any active CLC assignment without deleting its history.';
+}
+document.querySelectorAll('input[name="education_program"]').forEach(radio => radio.addEventListener('change', syncTeacherProgramPanel));
+syncTeacherProgramPanel();
 
 function parseIsoDate(value) {
     if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
@@ -677,7 +873,7 @@ async function promptTeacherPassword(message) {
     return prompt(message) || '';
 }
 
-document.querySelector('form[method="POST"]')?.addEventListener('submit', async function(e) {
+document.getElementById('teacherEditForm')?.addEventListener('submit', async function(e) {
     if (this.dataset.confirmed === '1') return;
     e.preventDefault();
     if (!this.checkValidity()) {

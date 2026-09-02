@@ -13,6 +13,7 @@ require_once dirname(__DIR__) . '/config.php';
 require_once __DIR__ . '/Core/Database.php';
 require_once __DIR__ . '/Support/auth.php';
 require_once __DIR__ . '/Support/functions.php';
+require_once __DIR__ . '/Support/applicants.php';
 
 // Feature actions in the ALS multi-CLC branch rely on the shared bootstrap to
 // initialize the authenticated request before permission and CSRF checks.

@@ -8,6 +8,7 @@ requireRoleSelection();
 $db = getDB();
 ensureArchiveSchema($db);
 requireDatabaseStructure($db, [
+    'teachers' => ['education_program'],
     'teacher_clc_assignments' => ['teacher_id', 'clc_school_id', 'assignment_status'],
 ]);
 
@@ -144,7 +145,7 @@ $pag    = paginate($total, $page);
 
 $data = $db->prepare(
     "SELECT t.employee_number, t.last_name, t.first_name, t.middle_name,
-            t.gender, t.birthdate, t.position, t.appointment_type,
+            t.gender, t.birthdate, t.position, t.education_program, t.appointment_type,
             t.grade_level, t.specialization, t.highest_education,
             t.csee_eligibility, t.data_privacy_consent,
             t.barangay, t.municipality, t.province,
@@ -156,6 +157,7 @@ $data = $db->prepare(
              FROM teacher_clc_assignments tca_list
              INNER JOIN schools sc_clc ON sc_clc.id = tca_list.clc_school_id
              WHERE tca_list.teacher_id = t.id
+               AND t.education_program = 'als'
                AND tca_list.assignment_status = 'Active') AS active_clc_assignments
      $baseSQL ORDER BY t.last_name, t.first_name LIMIT ? OFFSET ?"
 );
@@ -250,13 +252,13 @@ $buildReportUrl = function(array $overrides = []) use ($search, $filterDist, $fi
 
 <!-- ── Filters ─────────────────────────────────────────────── -->
 <div class="reports-toolbar glass-card">
-    <form method="GET" class="reports-filter-form" id="reportFilter">
+    <form method="GET" class="reports-filter-form" id="reportFilter" data-live-search-form>
         <div class="reports-filter-grid">
             <div class="reports-field reports-field-wide">
                 <label class="form-label">Search</label>
                 <div class="search-box">
                     <i class="fas fa-search search-icon"></i>
-                    <input type="text" name="q" class="form-input" placeholder="Search employee, name, school, district..." value="<?= clean($search) ?>">
+                    <input type="text" name="q" class="form-input" placeholder="Search employee, name, school, district..." value="<?= clean($search) ?>" data-live-search-input autocomplete="off">
                 </div>
             </div>
 
@@ -284,7 +286,7 @@ $buildReportUrl = function(array $overrides = []) use ($search, $filterDist, $fi
 
             <div class="reports-field">
                 <label class="form-label">Position</label>
-                <input type="text" name="pos" class="form-input" list="reportPositionOptions" placeholder="e.g. Master Teacher" value="<?= clean($filterPos) ?>">
+                <input type="text" name="pos" class="form-input" list="reportPositionOptions" placeholder="e.g. Master Teacher" value="<?= clean($filterPos) ?>" data-live-search-input autocomplete="off">
                 <datalist id="reportPositionOptions">
                     <?php foreach ($positions as $p): ?>
                     <option value="<?= clean($p) ?>"></option>
@@ -321,18 +323,18 @@ $buildReportUrl = function(array $overrides = []) use ($search, $filterDist, $fi
         <div class="reports-export-title"><i class="fas fa-file-export"></i> Export and Extraction</div>
         <div class="reports-export-grid">
             <?php if (canExportTeacherData()): ?>
-            <a href="<?= APP_URL ?>/actions/export.php?format=csv<?= $exportQuerySuffix ?>" class="btn btn-ghost btn-sm reports-export-btn">
+            <a href="<?= APP_URL ?>/actions/export.php?format=csv<?= $exportQuerySuffix ?>" class="btn btn-ghost btn-sm reports-export-btn" data-live-search-sync="reports-teacher-csv">
                 <i class="fas fa-file-csv"></i> Export Teacher CSV
             </a>
-            <a href="<?= APP_URL ?>/actions/export.php?format=excel<?= $exportQuerySuffix ?>" class="btn btn-ghost btn-sm reports-export-btn">
+            <a href="<?= APP_URL ?>/actions/export.php?format=excel<?= $exportQuerySuffix ?>" class="btn btn-ghost btn-sm reports-export-btn" data-live-search-sync="reports-teacher-excel">
                 <i class="fas fa-file-excel"></i> Export Teacher Excel
             </a>
             <?php endif; ?>
             <?php if (canExportOperationalData()): ?>
-            <a href="<?= APP_URL ?>/actions/export_school_heads.php?format=csv<?= $schoolHeadExportQuerySuffix ?>" class="btn btn-ghost btn-sm reports-export-btn reports-export-btn-heads">
+            <a href="<?= APP_URL ?>/actions/export_school_heads.php?format=csv<?= $schoolHeadExportQuerySuffix ?>" class="btn btn-ghost btn-sm reports-export-btn reports-export-btn-heads" data-live-search-sync="reports-heads-csv">
                 <i class="fas fa-user-tie"></i> Tagged School Heads CSV
             </a>
-            <a href="<?= APP_URL ?>/actions/export_school_heads.php?format=excel<?= $schoolHeadExportQuerySuffix ?>" class="btn btn-ghost btn-sm reports-export-btn reports-export-btn-heads">
+            <a href="<?= APP_URL ?>/actions/export_school_heads.php?format=excel<?= $schoolHeadExportQuerySuffix ?>" class="btn btn-ghost btn-sm reports-export-btn reports-export-btn-heads" data-live-search-sync="reports-heads-excel">
                 <i class="fas fa-user-tie"></i> Tagged School Heads Excel
             </a>
             <?php endif; ?>
@@ -407,6 +409,7 @@ $buildReportUrl = function(array $overrides = []) use ($search, $filterDist, $fi
 }
 </style>
 
+<div data-live-search-results="reports">
 <!-- ── Summary Mini Stats ──────────────────────────────────── -->
 <div class="stats-grid" style="--cols:4">
     <a href="<?= clean($buildReportUrl(['gen' => null])) ?>" class="report-stat-link <?= $filterGender === '' ? 'is-active' : '' ?>">
@@ -444,6 +447,7 @@ $buildReportUrl = function(array $overrides = []) use ($search, $filterDist, $fi
                     <th>Gender</th>
                     <th>Age</th>
                     <th>Position</th>
+                    <th>Teacher Program</th>
                     <th>Appt. Type</th>
                     <th>School</th>
                     <th>ALS CLC Assignments</th>
@@ -464,6 +468,7 @@ $buildReportUrl = function(array $overrides = []) use ($search, $filterDist, $fi
                 <td><?= clean($r['gender'] ?? '—') ?></td>
                 <td><?= calcAge($r['birthdate'] ?? null) ?? '—' ?></td>
                 <td><?= clean($r['position'] ?? '—') ?></td>
+                <td><?= clean(teacherEducationProgramLabel($r['education_program'] ?? 'formal')) ?></td>
                 <td><?= clean($r['appointment_type'] ?? '—') ?></td>
                 <td><?= clean($r['school_name'] ?? '—') ?></td>
                 <td><?= clean($r['active_clc_assignments'] ?? '—') ?></td>
@@ -490,7 +495,7 @@ $buildReportUrl = function(array $overrides = []) use ($search, $filterDist, $fi
             </tr>
             <?php endforeach; ?>
             <?php if (!$rows): ?>
-            <tr><td colspan="15" class="text-center text-muted">No records match the selected filters.</td></tr>
+            <tr><td colspan="16" class="text-center text-muted">No records match the selected filters.</td></tr>
             <?php endif; ?>
             </tbody>
         </table>
@@ -498,5 +503,6 @@ $buildReportUrl = function(array $overrides = []) use ($search, $filterDist, $fi
 </div>
 
 <?= paginationLinks($pag, APP_URL . '/' . basename($_SERVER['PHP_SELF']) . ($_SERVER['QUERY_STRING'] ? '?' . $_SERVER['QUERY_STRING'] : '')) ?>
+</div>
 
 <?php require_once dirname(__DIR__, 3) . '/includes/footer.php'; ?>

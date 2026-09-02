@@ -96,10 +96,10 @@ if ($search !== '') $paginationQuery['q'] = $search;
         <div class="topbar-title">Archived Records</div>
         <div class="text-muted small">Review why records were archived and restore them when appropriate.</div>
     </div>
-    <form method="GET" class="filter-form">
+    <form method="GET" class="filter-form" data-live-search-form>
         <div class="search-box">
             <i class="fas fa-search search-icon"></i>
-            <input class="form-input" name="q" value="<?= clean($search) ?>" placeholder="Search names, codes, or reasons...">
+            <input class="form-input" name="q" value="<?= clean($search) ?>" placeholder="Search names, codes, or reasons..." data-live-search-input autocomplete="off">
         </div>
         <input type="hidden" name="type" value="<?= clean($type) ?>">
         <?php if ($reasonTab !== ''): ?><input type="hidden" name="reason" value="<?= clean($reasonTab) ?>"><?php endif; ?>
@@ -120,6 +120,7 @@ if ($search !== '') $paginationQuery['q'] = $search;
     <?php endforeach; ?>
 </nav>
 
+<div data-live-search-results="archived-records">
 <div class="table-card glass-card">
     <div class="card-header">
         <h3><i class="fas fa-box-archive"></i> Archived Records</h3>
@@ -174,5 +175,6 @@ if ($search !== '') $paginationQuery['q'] = $search;
 </div>
 
 <?= paginationLinks($pag, $base . '?' . http_build_query($paginationQuery)) ?>
+</div>
 
 <?php require_once dirname(__DIR__, 3) . '/includes/footer.php'; ?>

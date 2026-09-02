@@ -9,7 +9,7 @@ verifyCsrf();
 $db = getDB();
 requireDatabaseStructure($db, [
     'municipalities' => ['id', 'municipality_name', 'province_name'],
-    'teachers' => ['barangay', 'barangay_psgc_code', 'municipality', 'municipality_psgc_code', 'province', 'province_psgc_code'],
+    'teachers' => ['education_program', 'barangay', 'barangay_psgc_code', 'municipality', 'municipality_psgc_code', 'province', 'province_psgc_code', 'coordinate_version'],
     'teacher_clc_assignments' => ['teacher_id', 'clc_school_id', 'school_year', 'is_primary', 'assignment_status'],
     'als_teacher_assignments' => ['teacher_id', 'start_school_year', 'end_school_year', 'assignment_status'],
     'als_teacher_assignment_clcs' => ['assignment_id', 'clc_school_id', 'is_primary'],
@@ -21,13 +21,18 @@ $fields = [
     'barangay_psgc_code', 'municipality_psgc_code', 'province_psgc_code',
     'birthdate', 'gender', 'civil_status', 'pwd_status', 'contact_number', 'email_address',
     'position', 'item_number', 'salary_grade', 'appointment_type', 'original_appointment_date',
-    'school_id', 'school_name_raw', 'plantilla_station', 'district_raw',
+    'school_id', 'school_name_raw', 'plantilla_station', 'district_raw', 'education_program',
     'specialization', 'subjects', 'highest_education', 'field_of_study', 'csee_eligibility',
 ];
 $data = [];
 foreach ($fields as $field) $data[$field] = is_scalar($_POST[$field] ?? null) ? trim((string)$_POST[$field]) : '';
 $data['grade_level'] = is_scalar($_POST['grade_level_hidden'] ?? null) ? trim((string)$_POST['grade_level_hidden']) : '';
 $data['data_privacy_consent'] = isset($_POST['data_privacy_consent']) ? 'Yes' : 'No';
+$data['location_precision'] = 'barangay';
+$data['location_verified'] = 1;
+$data['location_verified_at'] = date('Y-m-d H:i:s');
+$data['location_verified_by'] = (int)(currentUser()['id'] ?? 0);
+$data['coordinate_version'] = 1;
 $mappedSalaryGrade = teacherSalaryGradeForPosition($data['position']);
 if ($mappedSalaryGrade !== null) {
     $data['salary_grade'] = $mappedSalaryGrade;
@@ -52,6 +57,9 @@ foreach (['employee_number', 'last_name', 'first_name', 'gender', 'position'] as
 }
 if ($data['position'] !== '' && $mappedSalaryGrade === null) {
     $errors['position'] = 'Select a position/designation from the list.';
+}
+if (!array_key_exists($data['education_program'], teacherEducationPrograms())) {
+    $errors['education_program'] = 'Select Formal Education or Alternative Learning System (ALS).';
 }
 if ($selectedDistrictId <= 0) {
     $errors['district_id'] = 'Select a district.';
@@ -93,11 +101,20 @@ if ((int)($data['school_id'] ?? 0) > 0 && shouldFilterByDistrict()) {
     }
 }
 
+$subjectSelection = validateTeacherSubjectSelection(
+    $db,
+    $selectedSchoolId,
+    $_POST['subjects_selected'] ?? []
+);
+$data['subjects'] = $subjectSelection['value'];
+$errors = array_merge($errors, $subjectSelection['errors']);
+
+$isAlsTeacher = $data['education_program'] === 'als';
 $assignment = validateTeacherClcSelection(
     $db,
-    $_POST['als_clc_ids'] ?? [],
-    is_scalar($_POST['als_school_year'] ?? null) ? trim((string)$_POST['als_school_year']) : '',
-    $_POST['primary_clc_id'] ?? 0,
+    $isAlsTeacher ? ($_POST['als_clc_ids'] ?? []) : [],
+    $isAlsTeacher && is_scalar($_POST['als_school_year'] ?? null) ? trim((string)$_POST['als_school_year']) : '',
+    $isAlsTeacher ? ($_POST['primary_clc_id'] ?? 0) : 0,
     shouldFilterByDistrict() ? (int)getSessionDistrict() : null
 );
 $errors = array_merge($errors, $assignment['errors']);
@@ -150,6 +167,7 @@ try {
     );
     $db->commit();
     logActivity('CREATE', 'teachers', $teacherId, 'Added teacher: ' . $data['first_name'] . ' ' . $data['last_name']);
+    logActivity('CREATE', 'teacher_location', $teacherId, 'Created PSGC barangay-based approximate teacher location.');
     flash('success', 'Teacher added successfully.');
     $schoolId = (int)($data['school_id'] ?? 0);
     redirect(APP_URL . '/view_teacher.php?id=' . encryptId($teacherId) . ($schoolId > 0 ? '&school=' . urlencode(encryptId($schoolId)) : ''));

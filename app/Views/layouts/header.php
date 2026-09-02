@@ -149,6 +149,7 @@ $navLinks = [
     ['href' => 'dashboard',  'icon' => 'tachometer-alt',     'label' => 'Dashboard',   'page' => 'dashboard'],
     ['href' => 'profile',    'icon' => 'user-shield',        'label' => 'My Profile',  'page' => 'profile'],
     ['href' => 'teachers',   'icon' => 'chalkboard-teacher', 'label' => 'Teachers',    'page' => 'teachers'],
+    ['href' => 'applicants', 'icon' => 'user-graduate',      'label' => 'Applicant Pool', 'page' => 'applicants', 'roles' => ['admin', 'hr', 'psds', 'school_head', 'sdc', 'eps_vr', 'unit_head']],
     ['href' => 'schools',    'icon' => 'school',             'label' => 'Schools',     'page' => 'schools'],
     ['href' => 'als',        'icon' => 'book-open-reader',   'label' => 'ALS Centers', 'page' => 'als'],
     ['href' => 'districts',  'icon' => 'map-location-dot',   'label' => 'Districts',   'page' => 'districts', 'hideForRoles' => ['psds', 'sdc', 'unit_head']],

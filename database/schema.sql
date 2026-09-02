@@ -65,6 +65,13 @@ CREATE TABLE IF NOT EXISTS schools (
     municipality_psgc_code VARCHAR(10) DEFAULT NULL,
     province        VARCHAR(100) NOT NULL DEFAULT 'Aurora',
     province_psgc_code VARCHAR(10) NOT NULL DEFAULT '0307700000',
+    latitude         DECIMAL(10,7) DEFAULT NULL,
+    longitude        DECIMAL(10,7) DEFAULT NULL,
+    location_precision ENUM('exact','barangay','municipality') NOT NULL DEFAULT 'barangay',
+    location_verified TINYINT(1) NOT NULL DEFAULT 0,
+    location_verified_at DATETIME DEFAULT NULL,
+    location_verified_by INT UNSIGNED DEFAULT NULL,
+    coordinate_version INT UNSIGNED NOT NULL DEFAULT 1,
     sector           VARCHAR(20)  DEFAULT NULL,
     school_category  VARCHAR(20)  DEFAULT NULL,
     offers_formal_education TINYINT(1) NOT NULL DEFAULT 0,
@@ -118,6 +125,13 @@ CREATE TABLE IF NOT EXISTS teachers (
     municipality_psgc_code      VARCHAR(10) DEFAULT NULL,
     province                    VARCHAR(100) DEFAULT NULL,
     province_psgc_code          VARCHAR(10) DEFAULT NULL,
+    latitude                    DECIMAL(10,7) DEFAULT NULL,
+    longitude                   DECIMAL(10,7) DEFAULT NULL,
+    location_precision          ENUM('exact','barangay','municipality') NOT NULL DEFAULT 'barangay',
+    location_verified           TINYINT(1) NOT NULL DEFAULT 0,
+    location_verified_at        DATETIME DEFAULT NULL,
+    location_verified_by        INT UNSIGNED DEFAULT NULL,
+    coordinate_version          INT UNSIGNED NOT NULL DEFAULT 1,
     birthdate                   DATE         DEFAULT NULL,
     gender                      ENUM('Male','Female') DEFAULT NULL,
     civil_status                VARCHAR(30)  DEFAULT NULL,
@@ -132,6 +146,7 @@ CREATE TABLE IF NOT EXISTS teachers (
     appointment_type            VARCHAR(50)  DEFAULT NULL,
     original_appointment_date   DATE         DEFAULT NULL,
     school_id                   INT UNSIGNED DEFAULT NULL,
+    education_program           ENUM('formal','als') NOT NULL DEFAULT 'formal',
     school_id_code_raw          VARCHAR(50)  DEFAULT NULL,
     school_name_raw             VARCHAR(255) DEFAULT NULL,
     district_raw                VARCHAR(100) DEFAULT NULL,
@@ -171,6 +186,7 @@ CREATE TABLE IF NOT EXISTS teachers (
     INDEX idx_gender          (gender),
     INDEX idx_position        (position),
     INDEX idx_school_id       (school_id),
+    INDEX idx_education_program (education_program),
     INDEX idx_specialization  (specialization),
     INDEX idx_birthdate       (birthdate),
     INDEX idx_appointment_type(appointment_type),
@@ -392,7 +408,8 @@ INSERT IGNORE INTO schema_migrations (version) VALUES
     ('005_als_teacher_clc_assignments'),
     ('007_als_assignment_periods'),
     ('008_eps_vr_role'),
-    ('009_school_address');
+    ('009_school_address'),
+    ('011_teacher_education_program');
 
 -- Circular school-head relationship is added after both tables exist.
 ALTER TABLE schools

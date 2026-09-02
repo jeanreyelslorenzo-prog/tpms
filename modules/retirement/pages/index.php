@@ -539,10 +539,10 @@ $exportSuffix = $exportParams !== '' ? '&' . $exportParams : '';
 </div>
 
 <div class="filter-bar glass-card" style="margin-top:12px;display:grid;gap:10px;">
-    <form method="GET" class="filter-form retirement-filter-form">
+    <form method="GET" class="filter-form retirement-filter-form" data-live-search-form>
         <div class="form-group">
             <label class="form-label">Search</label>
-            <input type="text" name="q" class="form-input" placeholder="Name, employee no., school..." value="<?= clean($search) ?>">
+            <input type="text" name="q" class="form-input" placeholder="Name, employee no., school..." value="<?= clean($search) ?>" data-live-search-input autocomplete="off">
         </div>
         <div class="form-group">
             <label class="form-label">District</label>
@@ -592,13 +592,14 @@ $exportSuffix = $exportParams !== '' ? '&' . $exportParams : '';
         </div>
         <?php if (canExportOperationalData()): ?>
         <div class="retirement-actions-right">
-            <a href="<?= APP_URL ?>/actions/export_retirement_watch.php?format=csv<?= $exportSuffix ?>" class="btn btn-ghost btn-sm"><i class="fas fa-file-csv"></i> Extract CSV</a>
-            <a href="<?= APP_URL ?>/actions/export_retirement_watch.php?format=excel<?= $exportSuffix ?>" class="btn btn-ghost btn-sm"><i class="fas fa-file-excel"></i> Extract Excel</a>
+            <a href="<?= APP_URL ?>/actions/export_retirement_watch.php?format=csv<?= $exportSuffix ?>" class="btn btn-ghost btn-sm" data-live-search-sync="retirement-export-csv"><i class="fas fa-file-csv"></i> Extract CSV</a>
+            <a href="<?= APP_URL ?>/actions/export_retirement_watch.php?format=excel<?= $exportSuffix ?>" class="btn btn-ghost btn-sm" data-live-search-sync="retirement-export-excel"><i class="fas fa-file-excel"></i> Extract Excel</a>
         </div>
         <?php endif; ?>
     </div>
 </div>
 
+<div data-live-search-results="retirement-watch">
 <div class="table-card glass-card" id="retirementListView" style="margin-top:12px;">
     <div class="card-header">
         <h3><i class="fas fa-table"></i> Retirement Watch List</h3>
@@ -723,6 +724,7 @@ $exportSuffix = $exportParams !== '' ? '&' . $exportParams : '';
 </div>
 
 <?= paginationLinks($pag, APP_URL . '/retirement_watch.php' . ($_SERVER['QUERY_STRING'] ? '?' . $_SERVER['QUERY_STRING'] : '')) ?>
+</div>
 
 <form id="archiveRetiredTeacherForm" method="POST" action="<?= APP_URL ?>/actions/archive_retired_teacher.php" style="display:none;">
     <input type="hidden" name="csrf_token" value="<?= csrfToken() ?>"><input type="hidden" name="teacher_id" id="archiveRetiredTeacherId"><input type="hidden" name="confirm_password" id="archiveRetiredTeacherPassword">

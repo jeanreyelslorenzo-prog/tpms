@@ -8,6 +8,7 @@ requireRoleSelection();
 $db = getDB();
 ensureTeacherPlanningSchema($db);
 requireDatabaseStructure($db, [
+    'teachers' => ['education_program'],
     'teacher_clc_assignments' => ['teacher_id', 'clc_school_id', 'school_year', 'is_primary', 'assignment_status'],
     'als_teacher_assignments' => ['teacher_id', 'start_school_year', 'end_school_year', 'assignment_status'],
     'als_teacher_assignment_clcs' => ['assignment_id', 'clc_school_id', 'is_primary'],
@@ -80,7 +81,8 @@ if (shouldFilterByDistrict()) {
 $backSchoolId = $schoolCtx > 0 ? $schoolCtx : (int)($t['school_id'] ?? 0);
 $teachersBackUrl = APP_URL . '/teachers.php' . ($backSchoolId > 0 ? '?school=' . urlencode(encryptId($backSchoolId)) : '');
 $age = calcAge($t['birthdate']);
-$clcAssignments = fetchTeacherClcAssignments($db, (int)$t['id']);
+$isAlsTeacher = ($t['education_program'] ?? 'formal') === 'als';
+$clcAssignments = $isAlsTeacher ? fetchTeacherClcAssignments($db, (int)$t['id']) : [];
 $activeClcCount = 0;
 foreach ($clcAssignments as $assignment) {
     if (($assignment['assignment_status'] ?? '') !== 'Active') continue;
@@ -113,6 +115,7 @@ foreach ($clcAssignments as $assignment) {
                 <?= $t['extension_name'] ? ' ' . clean($t['extension_name']) : '' ?>
             </h1>
             <div class="profile-tags">
+                <span class="badge <?= $isAlsTeacher ? 'badge-green' : 'badge-gray' ?>"><i class="fas fa-chalkboard-teacher"></i> <?= clean(teacherEducationProgramLabel($t['education_program'] ?? 'formal')) ?></span>
                 <span class="badge badge-blue"><?= clean($t['position'] ?? '—') ?></span>
                 <?php if ($t['appointment_type']): ?>
                 <span class="badge badge-gray"><?= clean($t['appointment_type']) ?></span>
@@ -176,6 +179,7 @@ foreach ($clcAssignments as $assignment) {
         <div class="detail-card glass-card">
             <div class="card-header"><h3><i class="fas fa-briefcase"></i> Employment</h3></div>
             <dl class="detail-list">
+                <div class="dl-row"><dt>Teacher Program</dt><dd><?= clean(teacherEducationProgramLabel($t['education_program'] ?? 'formal')) ?></dd></div>
                 <div class="dl-row"><dt>Position</dt><dd><?= clean($t['position'] ?? '—') ?></dd></div>
                 <div class="dl-row"><dt>Item Number</dt><dd><?= clean($t['item_number'] ?? '—') ?></dd></div>
                 <div class="dl-row"><dt>Salary Grade</dt><dd><?= clean($t['salary_grade'] ?? '—') ?></dd></div>
@@ -199,6 +203,7 @@ foreach ($clcAssignments as $assignment) {
             </dl>
         </div>
 
+        <?php if ($isAlsTeacher): ?>
         <!-- ALS CLC assignments -->
         <div class="detail-card glass-card als-assignment-card">
             <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;gap:1rem">
@@ -248,6 +253,8 @@ foreach ($clcAssignments as $assignment) {
             <?php endif; ?>
             </div>
         </div>
+
+        <?php endif; ?>
 
         <!-- Education -->
         <div class="detail-card glass-card">

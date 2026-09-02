@@ -945,27 +945,163 @@ document.addEventListener('keydown', e => {
     }
 });
 
-// ── Debounce helper ──────────────────────────────────────────
-function debounce(fn, delay) {
-    let timer;
-    return function(...args) {
-        clearTimeout(timer);
-        timer = setTimeout(() => fn.apply(this, args), delay);
-    };
+// ── Uninterrupted live search ────────────────────────────────
+const liveSearchRequests = new WeakMap();
+let liveSearchSequence = 0;
+
+function buildLiveSearchUrl(form) {
+    const configuredAction = String(form.getAttribute('action') || '').trim();
+    const url = new URL(configuredAction || window.location.pathname, window.location.href);
+    const params = new URLSearchParams();
+
+    new FormData(form).forEach((value, key) => {
+        if (typeof value !== 'string' || key === 'page' || value === '') return;
+        params.append(key, value);
+    });
+
+    url.search = params.toString();
+    url.hash = '';
+    return url;
 }
 
-// ── Auto-submit search with debounce ────────────────────────
-const searchInput = document.getElementById('searchInput');
-if (searchInput) {
-    searchInput.addEventListener('input', debounce(function() {
-        const form = this.closest('form');
-        if (form) form.submit();
-    }, 600));
+function setLiveSearchStatus(form, state, message = '') {
+    const input = form.querySelector('[data-live-search-input]');
+    if (input) input.setAttribute('aria-busy', state === 'loading' ? 'true' : 'false');
+
+    let status = form.querySelector('[data-live-search-status]');
+    if (!status) {
+        status = document.createElement('span');
+        status.dataset.liveSearchStatus = '';
+        status.className = 'live-search-status text-muted small';
+        status.setAttribute('role', 'status');
+        status.setAttribute('aria-live', 'polite');
+        form.appendChild(status);
+    }
+
+    form.classList.toggle('is-live-searching', state === 'loading');
+    status.textContent = message;
+    status.hidden = message === '';
 }
+
+function replaceLiveSearchResults(scope, nextDocument) {
+    const nextParts = new Map();
+    nextDocument.querySelectorAll('[data-live-search-results]').forEach((part) => {
+        nextParts.set(part.dataset.liveSearchResults || '', part);
+    });
+
+    let replacements = 0;
+    scope.querySelectorAll('[data-live-search-results]').forEach((part) => {
+        const nextPart = nextParts.get(part.dataset.liveSearchResults || '');
+        if (!nextPart) return;
+
+        const displayState = new Map();
+        part.querySelectorAll('[id]').forEach((element) => {
+            displayState.set(element.id, element.style.display);
+        });
+
+        part.innerHTML = nextPart.innerHTML;
+        displayState.forEach((display, id) => {
+            const element = document.getElementById(id);
+            if (element && part.contains(element)) element.style.display = display;
+        });
+        replacements += 1;
+    });
+
+    return replacements;
+}
+
+function syncLiveSearchControls(scope, nextDocument) {
+    const nextControls = new Map();
+    nextDocument.querySelectorAll('[data-live-search-sync]').forEach((element) => {
+        nextControls.set(element.dataset.liveSearchSync || '', element);
+    });
+
+    scope.querySelectorAll('[data-live-search-sync]').forEach((element) => {
+        const nextElement = nextControls.get(element.dataset.liveSearchSync || '');
+        if (!nextElement) return;
+
+        ['href', 'action'].forEach((attribute) => {
+            if (nextElement.hasAttribute(attribute)) {
+                element.setAttribute(attribute, nextElement.getAttribute(attribute));
+            }
+        });
+        if ('value' in element && 'value' in nextElement) {
+            element.value = nextElement.value;
+        }
+    });
+}
+
+async function runLiveSearch(form) {
+    const previous = liveSearchRequests.get(form);
+    if (previous) previous.controller.abort();
+
+    const controller = new AbortController();
+    const sequence = ++liveSearchSequence;
+    liveSearchRequests.set(form, { controller, sequence });
+    const url = buildLiveSearchUrl(form);
+    const scope = form.closest('.page-content') || document;
+    setLiveSearchStatus(form, 'loading', 'Searching...');
+
+    try {
+        const response = await fetch(url.href, {
+            method: 'GET',
+            credentials: 'same-origin',
+            headers: {
+                'Accept': 'text/html',
+                'X-Requested-With': 'XMLHttpRequest'
+            },
+            signal: controller.signal
+        });
+        if (!response.ok) throw new Error(`Search request failed (${response.status}).`);
+
+        const html = await response.text();
+        const active = liveSearchRequests.get(form);
+        if (!active || active.sequence !== sequence) return;
+
+        const nextDocument = new DOMParser().parseFromString(html, 'text/html');
+        if (replaceLiveSearchResults(scope, nextDocument) === 0) {
+            throw new Error('The page did not return a live-search results region.');
+        }
+
+        syncLiveSearchControls(scope, nextDocument);
+        window.history.replaceState(window.history.state, '', url.href);
+        document.dispatchEvent(new CustomEvent('live-search:updated', {
+            detail: { form, url: url.href }
+        }));
+        setLiveSearchStatus(form, 'idle');
+    } catch (error) {
+        if (error && error.name === 'AbortError') return;
+        console.error('Live search failed:', error);
+        setLiveSearchStatus(form, 'error', 'Live search is temporarily unavailable. Press Enter to try again.');
+    }
+}
+
+document.addEventListener('input', (event) => {
+    if (!(event.target instanceof Element) || event.isComposing) return;
+    const input = event.target.closest('[data-live-search-input]');
+    const form = input ? input.closest('form[data-live-search-form]') : null;
+    if (form) runLiveSearch(form);
+});
+
+document.addEventListener('compositionend', (event) => {
+    if (!(event.target instanceof Element)) return;
+    const input = event.target.closest('[data-live-search-input]');
+    const form = input ? input.closest('form[data-live-search-form]') : null;
+    if (form) runLiveSearch(form);
+});
+
+document.addEventListener('submit', (event) => {
+    if (!(event.target instanceof Element)) return;
+    const form = event.target.closest('form[data-live-search-form]');
+    if (!form) return;
+    event.preventDefault();
+    runLiveSearch(form);
+});
 
 // ── Form loading state ───────────────────────────────────────
 document.querySelectorAll('form').forEach(form => {
     form.addEventListener('submit', function() {
+        if (this.matches('[data-live-search-form]')) return;
         const btn = this.querySelector('button[type="submit"]');
         if (btn && !btn.dataset.noLoad) {
             btn.disabled = true;

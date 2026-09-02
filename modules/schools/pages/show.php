@@ -7,6 +7,7 @@ $db = getDB();
 ensureArchiveSchema($db);
 ensureTeacherPlanningSchema($db);
 requireDatabaseStructure($db, [
+    'teachers' => ['education_program'],
     'municipalities' => ['id', 'municipality_name'],
     'districts' => ['id', 'district_name'],
     'schools' => [
@@ -100,7 +101,7 @@ $teacherStmt = $db->prepare(
                AND tca_year.clc_school_id = ' . $schoolId . '
                AND tca_year.assignment_status = "Active") AS clc_school_years
      FROM teachers t
-     WHERE ' . activeArchiveExclusion('teacher', 't.id') . '
+     WHERE ' . instructionalTeacherPredicate('t', 'formal') . '
        AND (' . implode(' OR ', $teacherConditions) . ')
      ORDER BY CASE WHEN t.id = ' . $schoolHeadId . ' THEN 0 ELSE 1 END, t.last_name, t.first_name'
 );
@@ -232,6 +233,12 @@ $planningUrl = APP_URL . '/requirement_planning.php?school=' . urlencode(encrypt
         <div class="school-profile-actions">
             <a href="<?= APP_URL ?>/schools.php" class="btn btn-ghost"><i class="fas fa-arrow-left"></i> Schools</a>
             <a href="<?= $planningUrl ?>" class="btn btn-secondary"><i class="fas fa-diagram-project"></i> Requirement Planning</a>
+            <?php if (canViewApplicantModule()): ?>
+            <a href="<?= APP_URL ?>/applicants.php?view=compare&school=<?= urlencode(encryptId($schoolId)) ?>" class="btn btn-ghost"><i class="fas fa-route"></i> Compare Teacher Distance</a>
+            <?php endif; ?>
+            <?php if (canCreateSubstituteRequest()): ?>
+            <a href="<?= APP_URL ?>/applicants.php?view=request_form&school=<?= urlencode(encryptId($schoolId)) ?>" class="btn btn-secondary"><i class="fas fa-person-circle-plus"></i> Request Substitute</a>
+            <?php endif; ?>
             <?php if (canEdit()): ?>
             <a href="<?= APP_URL ?>/add_teacher.php?school=<?= urlencode(encryptId($schoolId)) ?>" class="btn btn-primary"><i class="fas fa-user-plus"></i> Add Teacher</a>
             <a href="<?= APP_URL ?>/schools.php?edit_school=<?= urlencode(encryptId($schoolId)) ?>&return_school=<?= $schoolId ?>" class="btn btn-ghost"><i class="fas fa-edit"></i> School Setup</a>
@@ -303,9 +310,9 @@ $planningUrl = APP_URL . '/requirement_planning.php?school=' . urlencode(encrypt
 
     <section class="school-profile-card glass-card">
         <div class="school-profile-section-head">
-            <h2><i class="fas fa-chalkboard-teacher"></i> Teachers</h2>
+            <h2><i class="fas fa-chalkboard-teacher"></i> Formal Teachers</h2>
             <div class="school-teacher-view-controls">
-                <span class="badge badge-blue"><?= number_format(count($teachers)) ?> active</span>
+                <span class="badge badge-blue"><?= number_format(count($teachers)) ?> active formal teacher<?= count($teachers) === 1 ? '' : 's' ?></span>
                 <?php if ($teachers): ?>
                 <button type="button" class="btn btn-ghost btn-sm" id="schoolTeachersListBtn"><i class="fas fa-list"></i> List</button>
                 <button type="button" class="btn btn-ghost btn-sm" id="schoolTeachersCardBtn"><i class="fas fa-th-large"></i> Card</button>

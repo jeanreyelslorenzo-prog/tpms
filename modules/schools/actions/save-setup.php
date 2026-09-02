@@ -35,7 +35,7 @@ requireDatabaseStructure($db, [
     'municipalities' => ['id', 'municipality_name', 'province_name'],
     'school_curricular_offerings' => ['school_id', 'offering_code'],
     'school_level_statistics' => ['school_id', 'level_code', 'learner_count', 'class_count'],
-    'teachers' => ['employee_number', 'first_name', 'last_name', 'position', 'school_id', 'school_id_code_raw', 'school_name_raw'],
+    'teachers' => ['employee_number', 'first_name', 'last_name', 'position', 'school_id', 'school_id_code_raw', 'school_name_raw', 'education_program'],
     'teacher_clc_assignments' => ['teacher_id', 'clc_school_id', 'school_year', 'is_primary', 'assignment_status'],
     'als_teacher_assignments' => ['teacher_id', 'start_school_year', 'end_school_year', 'assignment_status'],
     'als_teacher_assignment_clcs' => ['assignment_id', 'clc_school_id', 'is_primary'],
@@ -181,25 +181,30 @@ try {
     $db->beginTransaction();
     $schoolHeadId = null;
     $createdTeacherIds = [];
+    $isAlsOnlyCenter = (int)($school['offers_als'] ?? 0) === 1
+        && (int)($school['offers_formal_education'] ?? 0) === 0;
+    $newTeacherProgram = $isAlsOnlyCenter ? 'als' : 'formal';
 
     if ($headMode === 'existing') {
         $schoolHeadId = $existingHeadId;
         $db->prepare('UPDATE schools SET school_head_teacher_id = NULL WHERE school_head_teacher_id = ? AND id <> ?')
             ->execute([$schoolHeadId, $schoolId]);
-        $db->prepare('UPDATE teachers SET school_id = ?, school_id_code_raw = ? WHERE id = ?')
-            ->execute([$schoolId, $school['school_id_code'], $schoolHeadId]);
+        $headUpdateSql = 'UPDATE teachers SET school_id = ?, school_id_code_raw = ?'
+            . ($isAlsOnlyCenter ? ", education_program = 'als'" : '')
+            . ' WHERE id = ?';
+        $db->prepare($headUpdateSql)->execute([$schoolId, $school['school_id_code'], $schoolHeadId]);
         $createdTeacherIds[] = $schoolHeadId;
     } elseif ($headMode === 'new') {
         $headInsert = $db->prepare(
             'INSERT INTO teachers
              (employee_number, first_name, middle_name, last_name, position, school_id,
-              school_id_code_raw, school_name_raw, created_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+              school_id_code_raw, school_name_raw, education_program, created_by)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         $headInsert->execute([
             $newHead['employee_number'], $newHead['first_name'], $newHead['middle_name'] ?: null,
             $newHead['last_name'], $newHead['position'] ?: 'School Principal', $schoolId,
-            $school['school_id_code'], $school['school_name'], (int)(currentUser()['id'] ?? 0) ?: null,
+            $school['school_id_code'], $school['school_name'], $newTeacherProgram, (int)(currentUser()['id'] ?? 0) ?: null,
         ]);
         $schoolHeadId = (int)$db->lastInsertId();
         $createdTeacherIds[] = $schoolHeadId;
@@ -208,20 +213,18 @@ try {
     $teacherInsert = $db->prepare(
         'INSERT INTO teachers
          (employee_number, first_name, middle_name, last_name, position, school_id,
-          school_id_code_raw, school_name_raw, created_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+          school_id_code_raw, school_name_raw, education_program, created_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     );
     foreach ($teacherRows as $teacher) {
         $teacherInsert->execute([
             $teacher['employee_number'], $teacher['first_name'], $teacher['middle_name'] ?: null,
             $teacher['last_name'], $teacher['position'] ?: 'Teacher I', $schoolId,
-            $school['school_id_code'], $school['school_name'], (int)(currentUser()['id'] ?? 0) ?: null,
+            $school['school_id_code'], $school['school_name'], $newTeacherProgram, (int)(currentUser()['id'] ?? 0) ?: null,
         ]);
         $createdTeacherIds[] = (int)$db->lastInsertId();
     }
 
-    $isAlsOnlyCenter = (int)($school['offers_als'] ?? 0) === 1
-        && (int)($school['offers_formal_education'] ?? 0) === 0;
     if ($isAlsOnlyCenter) {
         $assignmentSchoolYear = normalizeSchoolYear((string)($school['school_year'] ?? '')) ?: defaultSchoolYear();
         foreach (array_values(array_unique(array_filter($createdTeacherIds))) as $createdTeacherId) {

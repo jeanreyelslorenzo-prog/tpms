@@ -5,8 +5,11 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
 $db = getDB();
 ensureArchiveSchema($db);
 requireDatabaseStructure($db, [
+    'teachers' => ['education_program'],
+    'schools' => ['school_head_teacher_id'],
     'teacher_clc_assignments' => ['teacher_id', 'clc_school_id', 'assignment_status'],
 ]);
+$formalTeacherPredicate = instructionalTeacherPredicate('t', 'formal');
 $errors = [];
 $search = clean(trim((string)($_GET['q'] ?? '')));
 $selectedDistrict = trim((string)($_GET['district'] ?? ''));
@@ -36,7 +39,7 @@ $districtRows = $db->prepare(
             (SELECT COUNT(*)
              FROM teachers t
              LEFT JOIN schools st_primary ON t.school_id = st_primary.id
-             WHERE NOT EXISTS (SELECT 1 FROM archived_records ar_teacher WHERE ar_teacher.entity_type="teacher" AND ar_teacher.entity_id=t.id AND ar_teacher.restored_at IS NULL)
+             WHERE ' . $formalTeacherPredicate . '
                AND (st_primary.district_id = d.id
                 OR EXISTS (
                     SELECT 1 FROM teacher_clc_assignments tca_district
@@ -70,7 +73,7 @@ if ($selectedDistrict !== '') {
     $schoolStmt = $db->prepare(
         'SELECT s.id, s.school_name, s.school_type,
                 (SELECT COUNT(*) FROM teachers t
-                 WHERE ' . activeArchiveExclusion('teacher', 't.id') . ' AND (t.school_id = s.id OR EXISTS (
+                 WHERE ' . $formalTeacherPredicate . ' AND (t.school_id = s.id OR EXISTS (
                     SELECT 1 FROM teacher_clc_assignments tca_count
                     WHERE tca_count.teacher_id = t.id
                       AND tca_count.clc_school_id = s.id
@@ -92,13 +95,13 @@ if ($selectedDistrict !== '') {
 ?>
 
 <div class="filter-bar glass-card">
-    <form method="GET" class="filter-form">
+    <form method="GET" class="filter-form" data-live-search-form>
         <?php if ($selectedDistrict !== ''): ?>
         <input type="hidden" name="district" value="<?= clean($selectedDistrict) ?>">
         <?php endif; ?>
         <div class="search-box">
             <i class="fas fa-search search-icon"></i>
-            <input type="text" name="q" class="form-input" placeholder="Search districts…" value="<?= clean($search) ?>">
+            <input type="text" name="q" class="form-input" placeholder="Search districts…" value="<?= clean($search) ?>" data-live-search-input autocomplete="off">
         </div>
         <button type="submit" class="btn btn-ghost btn-sm"><i class="fas fa-search"></i></button>
         <?php if ($search !== ''): ?>
@@ -138,6 +141,7 @@ if ($selectedDistrict !== '') {
 
 
 
+<div data-live-search-results="districts">
 <div class="table-card glass-card" id="districtsListView">
     <div class="table-scroll">
         <table class="data-table">
@@ -145,7 +149,7 @@ if ($selectedDistrict !== '') {
                 <tr>
                     <th>District Name</th>
                     <th class="text-center">Schools</th>
-                    <th class="text-center">Teachers</th>
+                    <th class="text-center">Formal Teachers</th>
                     <th>Created</th>
                     <th>Updated</th>
                     <?php if (canEdit()): ?><th class="text-center">Actions</th><?php endif; ?>
@@ -203,7 +207,7 @@ if ($selectedDistrict !== '') {
         </div>
         <div class="school-card-meta" style="margin-top:10px;display:grid;gap:6px;">
             <span><i class="fas fa-school"></i> Schools: <strong><?= number_format((int)$district['school_count']) ?></strong></span>
-            <span><i class="fas fa-users"></i> Teachers: <strong><?= number_format((int)$district['teacher_count']) ?></strong></span>
+            <span><i class="fas fa-users"></i> Formal Teachers: <strong><?= number_format((int)$district['teacher_count']) ?></strong></span>
             <span><i class="fas fa-calendar-plus"></i> Created: <?= formatDate($district['created_at'] ?? null) ?></span>
             <span><i class="fas fa-clock-rotate-left"></i> Updated: <?= formatDate($district['updated_at'] ?? null) ?></span>
         </div>
@@ -231,6 +235,7 @@ if ($selectedDistrict !== '') {
     </div>
     <?php endif; ?>
 </div>
+</div>
 
 <?php if ($selectedDistrict !== ''): ?>
 <div class="modal-overlay" id="districtSchoolsModal" style="display:none;">
@@ -244,13 +249,13 @@ if ($selectedDistrict !== '') {
         </div>
         <div style="display:flex;gap:10px;flex-wrap:wrap;margin:8px 0 14px 0;">
             <span class="badge badge-blue" style="padding:6px 10px;"><?= number_format(count($selectedDistrictSchools)) ?> Schools</span>
-            <span class="badge badge-green" style="padding:6px 10px;"><?= number_format($selectedDistrictTeacherTotal) ?> Teachers</span>
+            <span class="badge badge-green" style="padding:6px 10px;"><?= number_format($selectedDistrictTeacherTotal) ?> Formal Teachers</span>
         </div>
 
         <?php if ($selectedDistrictSchools): ?>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;">
             <?php foreach ($selectedDistrictSchools as $school): ?>
-            <a href="<?= APP_URL ?>/teachers.php?school=<?= urlencode(encryptId((int)$school['id'])) ?>"
+            <a href="<?= APP_URL ?>/teachers.php?school=<?= urlencode(encryptId((int)$school['id'])) ?>&amp;workforce=formal"
                style="display:block;padding:12px;border-radius:12px;border:1px solid rgba(148,163,184,.22);background:linear-gradient(160deg, rgba(15,23,42,.55), rgba(30,41,59,.42));text-decoration:none;transition:.2s transform,.2s border-color,.2s box-shadow;"
                onmouseover="this.style.transform='translateY(-2px)';this.style.borderColor='rgba(56,189,248,.55)';this.style.boxShadow='0 10px 24px rgba(2,132,199,.15)'"
                onmouseout="this.style.transform='';this.style.borderColor='rgba(148,163,184,.22)';this.style.boxShadow='none'">
@@ -260,7 +265,7 @@ if ($selectedDistrict !== '') {
                 </div>
                 <div style="margin-top:8px;display:flex;justify-content:space-between;align-items:center;color:#cbd5e1;font-size:12px;">
                     <span><i class="fas fa-tag"></i> <?= clean($school['school_type'] ?: 'Untagged') ?></span>
-                    <span><i class="fas fa-users"></i> Open Teachers</span>
+                    <span><i class="fas fa-users"></i> Open Formal Teachers</span>
                 </div>
             </a>
             <?php endforeach; ?>

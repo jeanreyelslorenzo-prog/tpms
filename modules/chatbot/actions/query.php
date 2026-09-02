@@ -217,8 +217,11 @@ $_SESSION['chatbot_req_times'][] = $now;
 
 $db = getDB();
 requireDatabaseStructure($db, [
+    'teachers' => ['education_program'],
+    'schools' => ['school_head_teacher_id'],
     'teacher_clc_assignments' => ['teacher_id', 'clc_school_id', 'assignment_status'],
 ]);
+$formalTeacherPredicate = instructionalTeacherPredicate('t', 'formal');
 $text = strtolower($message);
 
 /**
@@ -929,7 +932,7 @@ if ($wantsForecast && !$isDownloadCmd) {
             [
                 'Current students: ' . number_format($currentStudents),
                 'Projected students: ' . number_format($projectedStudents),
-                'Current teachers: ' . number_format($currentTeachers),
+                'Current formal teachers: ' . number_format($currentTeachers),
                 'Projected teacher requirement (max of ratio/load/classes rules): ' . number_format($projectedRecommendedTeachers),
                 'Additional teachers needed: ' . number_format($additionalNeeded),
             ],
@@ -1001,7 +1004,7 @@ if ($wantsPlanningAnalysis && !$isDownloadCmd) {
 
     $detailLines = [
         'Students: ' . number_format((int)($s['total_students'] ?? 0)),
-        'Teachers: ' . number_format((int)($s['total_teachers'] ?? 0)),
+        'Formal teachers: ' . number_format((int)($s['total_teachers'] ?? 0)),
         'Current student-teacher ratio: ' . $ratioActual,
         'Recommended teachers (max of ratio/load/classes rules): ' . number_format((int)($s['recommended_teachers'] ?? 0)),
         'Overloaded teachers: ' . number_format((int)($s['overloaded_teachers'] ?? 0)),
@@ -1163,20 +1166,21 @@ if ($wantsFeatureList && !$isDownloadCmd) {
 }
 
 if ($wantsSystemOverview) {
-    $teacherTotal = (int)$db->query('SELECT COUNT(*) FROM teachers')->fetchColumn();
+    $teacherTotal = (int)$db->query("SELECT COUNT(*) FROM teachers t WHERE $formalTeacherPredicate")->fetchColumn();
     $schoolTotal = (int)$db->query('SELECT COUNT(*) FROM schools')->fetchColumn();
     $districtTotal = (int)$db->query('SELECT COUNT(*) FROM districts')->fetchColumn();
-    $pwdTotal = (int)$db->query("SELECT COUNT(*) FROM teachers WHERE LOWER(TRIM(COALESCE(pwd_status, ''))) IN ('yes','pwd','1','true')")->fetchColumn();
+    $pwdTotal = (int)$db->query("SELECT COUNT(*) FROM teachers t WHERE $formalTeacherPredicate AND LOWER(TRIM(COALESCE(t.pwd_status, ''))) IN ('yes','pwd','1','true')")->fetchColumn();
 
     $retiringWithin12Months = (int)$db->query(
-        "SELECT COUNT(*) FROM teachers
-         WHERE retirement_date IS NOT NULL
+        "SELECT COUNT(*) FROM teachers t
+         WHERE $formalTeacherPredicate
+           AND retirement_date IS NOT NULL
            AND retirement_date <> '0000-00-00'
            AND retirement_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 12 MONTH)"
     )->fetchColumn();
 
     $details = [
-        'Teachers: ' . number_format($teacherTotal),
+        'Formal teachers: ' . number_format($teacherTotal),
         'Schools: ' . number_format($schoolTotal),
         'Districts: ' . number_format($districtTotal),
         'PWD-tagged teachers: ' . number_format($pwdTotal),
@@ -1271,12 +1275,12 @@ if ($wantsUniversalSearch && !$isDownloadCmd) {
           'SELECT s.id, s.school_name, s.school_type, s.learner_count,
                      COALESCE(d.district_name, "") AS district,
                      (SELECT COUNT(*) FROM teachers t
-                      WHERE t.school_id = s.id OR EXISTS (
+                      WHERE ' . $formalTeacherPredicate . ' AND (t.school_id = s.id OR EXISTS (
                          SELECT 1 FROM teacher_clc_assignments tca_count
                          WHERE tca_count.teacher_id = t.id
                            AND tca_count.clc_school_id = s.id
                            AND tca_count.assignment_status = "Active"
-                      )) AS teacher_count
+                      ))) AS teacher_count
             FROM schools s
             LEFT JOIN districts d ON s.district_id = d.id
             WHERE s.school_name LIKE ?
@@ -1309,8 +1313,9 @@ if ($wantsUniversalSearch && !$isDownloadCmd) {
                 (SELECT COUNT(*)
                  FROM teachers t
                  LEFT JOIN schools s2 ON t.school_id = s2.id
-                 WHERE s2.district_id = d.id
-                    OR LOWER(COALESCE(t.district_raw, "")) LIKE LOWER(?)) AS teacher_count
+                 WHERE ' . $formalTeacherPredicate . '
+                   AND (s2.district_id = d.id
+                    OR LOWER(COALESCE(t.district_raw, "")) LIKE LOWER(?))) AS teacher_count
          FROM districts d
          WHERE d.district_name LIKE ?
          ORDER BY d.district_name
@@ -1436,8 +1441,9 @@ if ($mentionsDistrictEntity && !$mentionsTeacherEntity && !$mentionsSchoolEntity
                 (SELECT COUNT(*)
                  FROM teachers t
                  LEFT JOIN schools s2 ON t.school_id = s2.id
-                 WHERE s2.district_id = d.id
-                    OR LOWER(COALESCE(t.district_raw, "")) LIKE LOWER(?)) AS teacher_count
+                 WHERE ' . $formalTeacherPredicate . '
+                   AND (s2.district_id = d.id
+                    OR LOWER(COALESCE(t.district_raw, "")) LIKE LOWER(?))) AS teacher_count
          FROM districts d'
         . $districtWhere
         . ' ORDER BY d.district_name LIMIT ?';
@@ -1730,12 +1736,13 @@ if ($mentionsSchoolEntity && !$mentionsTeacherEntity) {
     if ($schoolFilters['staffing'] === 'no_teacher') {
         $schoolConditions[] = 'NOT EXISTS (
             SELECT 1 FROM teachers t0
-            WHERE t0.school_id = s.id OR EXISTS (
+            WHERE ' . instructionalTeacherPredicate('t0', 'formal') . '
+              AND (t0.school_id = s.id OR EXISTS (
                 SELECT 1 FROM teacher_clc_assignments tca0
                 WHERE tca0.teacher_id = t0.id
                   AND tca0.clc_school_id = s.id
                   AND tca0.assignment_status = "Active"
-            )
+            ))
         )';
     }
 
@@ -1754,12 +1761,12 @@ if ($mentionsSchoolEntity && !$mentionsTeacherEntity) {
                 COALESCE(d.district_name, "") AS district,
                 CONCAT_WS(" ", sh.first_name, sh.last_name) AS school_head_name,
                 (SELECT COUNT(*) FROM teachers t
-                 WHERE t.school_id = s.id OR EXISTS (
+                 WHERE ' . $formalTeacherPredicate . ' AND (t.school_id = s.id OR EXISTS (
                     SELECT 1 FROM teacher_clc_assignments tca_count
                     WHERE tca_count.teacher_id = t.id
                       AND tca_count.clc_school_id = s.id
                       AND tca_count.assignment_status = "Active"
-                 )) AS teacher_count'
+                 ))) AS teacher_count'
         . $schoolFromSql . '
         ORDER BY s.school_name
         LIMIT ?'
@@ -2136,12 +2143,12 @@ if (!$rows) {
             'SELECT s.id, s.school_name, s.school_type, s.learner_count,
                         COALESCE(d.district_name, "") AS district,
                         (SELECT COUNT(*) FROM teachers t
-                         WHERE t.school_id = s.id OR EXISTS (
+                         WHERE ' . $formalTeacherPredicate . ' AND (t.school_id = s.id OR EXISTS (
                             SELECT 1 FROM teacher_clc_assignments tca_count
                             WHERE tca_count.teacher_id = t.id
                               AND tca_count.clc_school_id = s.id
                               AND tca_count.assignment_status = "Active"
-                         )) AS teacher_count
+                         ))) AS teacher_count
              FROM schools s
              LEFT JOIN districts d ON s.district_id = d.id
              WHERE s.school_name LIKE ?
@@ -2160,8 +2167,9 @@ if (!$rows) {
                     (SELECT COUNT(*)
                      FROM teachers t
                      LEFT JOIN schools s2 ON t.school_id = s2.id
-                     WHERE s2.district_id = d.id
-                        OR LOWER(COALESCE(t.district_raw, "")) LIKE LOWER(?)) AS teacher_count
+                     WHERE ' . $formalTeacherPredicate . '
+                       AND (s2.district_id = d.id
+                        OR LOWER(COALESCE(t.district_raw, "")) LIKE LOWER(?))) AS teacher_count
              FROM districts d
              WHERE d.district_name LIKE ?
              ORDER BY d.district_name

@@ -28,7 +28,7 @@ define('DB_CHARSET', (string)(getenv('TPMS_DB_CHARSET') ?: ($databaseConfig['cha
 // Application
 define('APP_NAME', 'TPMS');
 define('APP_FULL_NAME', 'Teacher Profiling Management System');
-define('APP_VERSION', '2.0.0');
+define('APP_VERSION', '2.1.0');
 
 // Build APP_URL dynamically so redirects work on localhost, LAN IPs, cPanel,
 // and subfolder deployments without leaking filesystem paths.
@@ -137,6 +137,33 @@ define('PLANNING_DEFAULT_MAX_TEACHING_LOAD_HOURS', 30);
 define('PLANNING_DEFAULT_STUDENT_TEACHER_RATIO', 35);
 define('PLANNING_DEFAULT_UTILIZATION_THRESHOLD', 90);
 define('PLANNING_DEFAULT_HOURS_PER_CLASS_WEEK', 5);
+
+// Teacher Applicant Pool and server-side Google Routes integration.
+// Secrets belong in TPMS_GOOGLE_ROUTES_API_KEY or ignored config/local.php.
+$applicantConfig = is_array($localConfig['teacher_applicants'] ?? null)
+    ? $localConfig['teacher_applicants']
+    : [];
+$routesConfig = is_array($localConfig['google_routes'] ?? null)
+    ? $localConfig['google_routes']
+    : [];
+define('SUBSTITUTE_MINIMUM_LEAVE_DAYS', max(0, (int)($applicantConfig['substitute_minimum_leave_days'] ?? 30)));
+define('APPLICANT_DISTANCE_CACHE_DAYS', max(1, (int)($applicantConfig['distance_cache_days'] ?? 30)));
+define('GOOGLE_ROUTES_API_KEY', trim((string)(getenv('TPMS_GOOGLE_ROUTES_API_KEY') ?: ($routesConfig['api_key'] ?? ''))));
+define('GOOGLE_ROUTES_TIMEOUT_SECONDS', max(2, min(30, (int)($routesConfig['timeout_seconds'] ?? 8))));
+// Address waypoints are limited to 50 total; reserve one for the school destination.
+define('GOOGLE_ROUTES_BATCH_SIZE', max(1, min(49, (int)($routesConfig['batch_size'] ?? 25))));
+
+// Policy ceilings are intentionally unset until confirmed by SDO/RQA policy.
+// Configure decimal ceilings in local.php when approved; null means no policy
+// ceiling beyond the DECIMAL(7,2) database range.
+define('APPLICANT_SCORE_MAXIMA', [
+    'education' => $applicantConfig['score_maxima']['education'] ?? null,
+    'training' => $applicantConfig['score_maxima']['training'] ?? null,
+    'experience' => $applicantConfig['score_maxima']['experience'] ?? null,
+    'let_pbet_rating' => $applicantConfig['score_maxima']['let_pbet_rating'] ?? null,
+    'coi' => $applicantConfig['score_maxima']['coi'] ?? null,
+    'ncoi' => $applicantConfig['score_maxima']['ncoi'] ?? null,
+]);
 
 // Stable secret used for encrypted record IDs and verification links.
 $encryptionKey = trim((string)(getenv('TPMS_ENCRYPT_KEY') ?: ($localConfig['encryption_key'] ?? '')));
@@ -327,6 +354,88 @@ define('ALS_CURRICULAR_OFFERINGS', [
     'ALS-SHS' => 'ALS Senior High School',
 ]);
 
+// Controlled Subjects/s Taught choices. The teacher form shows only the
+// subjects supported by the selected school's curricular offerings. KINDER
+// schools use the Elementary catalog (normalized by the teacher helpers).
+define('TEACHER_SUBJECTS_BY_OFFERING', [
+    'ELEMENTARY' => [
+        'General Education',
+        'Kindergarten / Early Childhood Education',
+        'Language / Mother Tongue',
+        'Reading and Literacy',
+        'English',
+        'Filipino',
+        'Mathematics',
+        'Science',
+        'Makabansa',
+        'Araling Panlipunan',
+        'Good Manners and Right Conduct (GMRC)',
+        'Edukasyong Pantahanan at Pangkabuhayan (EPP)',
+        'Technology and Livelihood Education (TLE)',
+        'MAPEH',
+        'Music and Arts',
+        'Physical Education and Health',
+        'Special Needs Education (SNED/SPED)',
+    ],
+    'JHS' => [
+        'English',
+        'Filipino',
+        'Mathematics',
+        'Science',
+        'Araling Panlipunan / Social Studies',
+        'Values Education',
+        'MAPEH',
+        'Music',
+        'Arts',
+        'Physical Education',
+        'Health Education',
+        'Technology and Livelihood Education – General',
+        'TLE – Information and Communications Technology',
+        'TLE – Agriculture and Fishery Arts',
+        'TLE – Home Economics',
+        'TLE – Industrial Arts',
+    ],
+    'SHS' => [
+        'Effective Communication',
+        'Mabisang Komunikasyon',
+        'General Mathematics',
+        'General Science',
+        'Life and Career Skills',
+        'Pag-aaral ng Kasaysayan at Lipunang Pilipino',
+        'English / Communication',
+        'Filipino / Communication',
+        'Mathematics',
+        'Statistics and Probability',
+        'Biology',
+        'Chemistry',
+        'Physics',
+        'Earth and Space Science',
+        'Social Sciences and Humanities',
+        'Philippine History and Governance',
+        'Accountancy',
+        'Business Finance',
+        'Economics',
+        'Entrepreneurship',
+        'Organization and Management',
+        'Information and Communications Technology',
+        'Data Analytics',
+        'Research',
+        'Arts and Creative Industries',
+        'Physical Education, Sports and Health',
+        'Computer Systems Servicing',
+        'Housekeeping Services',
+        'Food and Beverage Services',
+        'Cookery / Food Preparation',
+        'Tourism Services',
+        'Hilot / Wellness Massage',
+        'Shielded Metal Arc Welding',
+        'Carpentry',
+        'Agricultural Crops Production',
+        'Organic Agriculture Production',
+        'Animal Production – Ruminants',
+    ],
+]);
+
 // Controlled teacher designations and their corresponding DepEd salary grades.
 define('TEACHER_POSITION_GROUPS', [
     'Teaching Positions' => [
@@ -450,6 +559,14 @@ define('TEACHER_SPECIALIZATIONS', [
     'Guidance and Counseling',
     'Library and Information Science',
     'Other Specialization',
+]);
+
+// The current teacher specialization source has no level metadata. These
+// overrides keep General Education elementary-only while allowing policy staff
+// to narrow individual JHS/SHS values without duplicating the shared list.
+define('TEACHER_SPECIALIZATION_LEVEL_OVERRIDES', [
+    'General Education' => ['elementary'],
+    'Early Childhood Education' => ['elementary'],
 ]);
 
 // Timezone

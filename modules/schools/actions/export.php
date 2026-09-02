@@ -17,7 +17,8 @@ if (!in_array($format, ['csv', 'excel'], true)) {
 $db = getDB();
 ensureArchiveSchema($db);
 requireDatabaseStructure($db, [
-    'schools' => ['barangay', 'province'],
+    'schools' => ['barangay', 'province', 'school_head_teacher_id'],
+    'teachers' => ['education_program'],
     'teacher_clc_assignments' => ['teacher_id', 'clc_school_id', 'assignment_status'],
 ]);
 
@@ -182,12 +183,13 @@ if ($type === 'untagged') {
 if ($staffing === 'no_teacher') {
     $conditions[] = "NOT EXISTS (
         SELECT 1 FROM teachers t0
-        WHERE t0.school_id = s.id OR EXISTS (
+        WHERE " . instructionalTeacherPredicate('t0', 'formal') . "
+          AND (t0.school_id = s.id OR EXISTS (
             SELECT 1 FROM teacher_clc_assignments tca0
             WHERE tca0.teacher_id = t0.id
               AND tca0.clc_school_id = s.id
               AND tca0.assignment_status = 'Active'
-        )
+        ))
     )";
 }
 
@@ -208,12 +210,12 @@ $sql = 'SELECT
             COALESCE(s.als_subtype, "") AS als_subtype,
             COALESCE(s.learner_count, 0) AS learners,
             (SELECT COUNT(*) FROM teachers t
-             WHERE t.school_id = s.id OR EXISTS (
+             WHERE ' . instructionalTeacherPredicate('t', 'formal') . ' AND (t.school_id = s.id OR EXISTS (
                 SELECT 1 FROM teacher_clc_assignments tca_count
                 WHERE tca_count.teacher_id = t.id
                   AND tca_count.clc_school_id = s.id
                   AND tca_count.assignment_status = "Active"
-             )) AS teachers
+             ))) AS teachers
         FROM schools s
         LEFT JOIN districts d ON s.district_id = d.id'
         . $where . '
@@ -237,7 +239,7 @@ logActivity(
     ], JSON_UNESCAPED_UNICODE)
 );
 
-$headers = ['School Name', 'School ID Code', 'Municipality', 'School Address', 'District', 'School Type', 'ALS Subtype', 'Teachers', 'Learners'];
+$headers = ['School Name', 'School ID Code', 'Municipality', 'School Address', 'District', 'School Type', 'ALS Subtype', 'Formal Teachers', 'Learners'];
 $colKeys = ['school_name', 'school_id_code', 'municipality', 'school_address', 'district', 'school_type', 'als_subtype', 'teachers', 'learners'];
 
 $filename = 'TPMS_Schools_Export_' . date('Ymd_His');

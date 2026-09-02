@@ -154,6 +154,181 @@ function teacherSalaryGradeForPosition(?string $position): ?string {
     return TEACHER_POSITION_SALARY_GRADES[$position] ?? null;
 }
 
+/** Teacher program choices used by both teacher forms and save validation. */
+function teacherEducationPrograms(): array {
+    return [
+        'formal' => 'Formal Education',
+        'als' => 'Alternative Learning System (ALS)',
+    ];
+}
+
+function teacherEducationProgramLabel(?string $program): string {
+    return teacherEducationPrograms()[trim((string)$program)] ?? 'Formal Education';
+}
+
+/**
+ * SQL predicate for instructional-teacher counts.
+ *
+ * Teacher registry pages may still show every record, but workforce totals use
+ * this predicate so a tagged school head is never counted as a teacher and ALS
+ * personnel never enter Formal Education totals (or vice versa).
+ */
+function instructionalTeacherPredicate(string $teacherAlias = 't', string $program = 'formal'): string {
+    if (!preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $teacherAlias)) {
+        throw new InvalidArgumentException('Invalid teacher SQL alias.');
+    }
+    if (!array_key_exists($program, teacherEducationPrograms())) {
+        throw new InvalidArgumentException('Invalid teacher education program.');
+    }
+
+    return '(' . activeArchiveExclusion('teacher', $teacherAlias . '.id')
+        . ' AND ' . $teacherAlias . '.education_program = ' . ($program === 'als' ? '"als"' : '"formal"')
+        . ' AND NOT EXISTS (
+            SELECT 1 FROM schools instructional_head_school
+            WHERE instructional_head_school.school_head_teacher_id = ' . $teacherAlias . '.id
+              AND ' . activeArchiveExclusion('school', 'instructional_head_school.id') . '
+        ))';
+}
+
+/** Normalize school offerings that can drive the Subjects/s Taught checklist. */
+function normalizeTeacherSubjectOfferings(array $offerings): array {
+    $allowed = array_keys(TEACHER_SUBJECTS_BY_OFFERING);
+    $normalized = [];
+    foreach ($offerings as $offering) {
+        if (!is_scalar($offering)) continue;
+        $code = strtoupper(trim((string)$offering));
+        if ($code === 'KINDER') $code = 'ELEMENTARY';
+        if ($code === 'ALS-SHS') $code = 'SHS';
+        if ($code !== '' && in_array($code, $allowed, true) && !in_array($code, $normalized, true)) {
+            $normalized[] = $code;
+        }
+    }
+    return $normalized;
+}
+
+/** Return each controlled subject with every school offering that supports it. */
+function teacherSubjectOptions(): array {
+    $options = [];
+    foreach (TEACHER_SUBJECTS_BY_OFFERING as $offering => $subjects) {
+        foreach ($subjects as $subject) {
+            $subject = trim((string)$subject);
+            if ($subject === '') continue;
+            $options[$subject] ??= [];
+            if (!in_array($offering, $options[$subject], true)) {
+                $options[$subject][] = $offering;
+            }
+        }
+    }
+    return $options;
+}
+
+/** Split teachers.subjects, supporting new semicolon and legacy comma separators. */
+function parseTeacherSubjects(?string $value): array {
+    $value = trim((string)$value);
+    if ($value === '') return [];
+
+    // A controlled subject may itself contain a comma, so recognize an exact
+    // catalog value before falling back to the legacy comma separator.
+    if (isset(teacherSubjectOptions()[$value])) return [$value];
+
+    $separator = str_contains($value, ';') ? '/\s*;\s*/u' : '/\s*,\s*/u';
+    $subjects = [];
+    foreach (preg_split($separator, $value, -1, PREG_SPLIT_NO_EMPTY) ?: [] as $subject) {
+        $subject = trim((string)preg_replace('/\s+/u', ' ', $subject));
+        if ($subject !== '' && !in_array($subject, $subjects, true)) $subjects[] = $subject;
+    }
+    return $subjects;
+}
+
+/** Return the controlled subject list supported by a set of school offerings. */
+function teacherSubjectsForOfferings(array $offerings): array {
+    $offerings = normalizeTeacherSubjectOfferings($offerings);
+    $subjects = [];
+    foreach (TEACHER_SUBJECTS_BY_OFFERING as $offering => $offeringSubjects) {
+        if (!in_array($offering, $offerings, true)) continue;
+        foreach ($offeringSubjects as $subject) {
+            if (!in_array($subject, $subjects, true)) $subjects[] = $subject;
+        }
+    }
+    return $subjects;
+}
+
+/** Load the authoritative curricular offerings for one school. */
+function fetchSchoolTeacherSubjectOfferings(PDO $db, int $schoolId): array {
+    requireDatabaseStructure($db, [
+        'schools' => ['id'],
+        'school_curricular_offerings' => ['school_id', 'offering_code'],
+    ]);
+    if ($schoolId <= 0) return [];
+    $stmt = $db->prepare(
+        'SELECT offering_code FROM school_curricular_offerings
+         WHERE school_id = ? ORDER BY offering_code'
+    );
+    $stmt->execute([$schoolId]);
+    return normalizeTeacherSubjectOfferings($stmt->fetchAll(PDO::FETCH_COLUMN));
+}
+
+/** Normalize and authorize checklist values against the selected school. */
+function validateTeacherSubjectSelection(
+    PDO $db,
+    int $schoolId,
+    mixed $rawSelected,
+    array $allowedLegacy = [],
+    mixed $rawLegacy = []
+): array {
+    $errors = [];
+    $normalizeList = static function (mixed $raw, string $fieldLabel) use (&$errors): array {
+        if ($raw === null) return [];
+        if (!is_array($raw)) {
+            $errors['subjects'] = $fieldLabel . ' must be selected from the checklist.';
+            return [];
+        }
+        $values = [];
+        foreach ($raw as $value) {
+            if (!is_scalar($value)) {
+                $errors['subjects'] = $fieldLabel . ' must be selected from the checklist.';
+                continue;
+            }
+            $value = trim((string)preg_replace('/\s+/u', ' ', (string)$value));
+            if ($value !== '' && !in_array($value, $values, true)) $values[] = $value;
+        }
+        return $values;
+    };
+
+    $selected = $normalizeList($rawSelected, 'Subjects');
+    $legacy = $normalizeList($rawLegacy, 'Legacy subjects');
+    $allowedSubjects = teacherSubjectsForOfferings(fetchSchoolTeacherSubjectOfferings($db, $schoolId));
+    $allowedLegacy = array_values(array_unique(array_map(
+        static fn(mixed $value): string => trim((string)$value),
+        $allowedLegacy
+    )));
+
+    if (array_diff($selected, $allowedSubjects)) {
+        $errors['subjects'] = 'Select only subjects offered by the chosen School Station.';
+    }
+    if (array_diff($legacy, $allowedLegacy)) {
+        $errors['subjects'] = 'One or more legacy subjects could not be verified.';
+    }
+
+    $subjects = array_values(array_unique(array_merge(
+        array_values(array_intersect($selected, $allowedSubjects)),
+        array_values(array_intersect($legacy, $allowedLegacy))
+    )));
+    // Semicolons keep subject names containing commas intact while remaining
+    // backward compatible with imported comma-separated values.
+    $value = implode('; ', $subjects);
+    if (mb_strlen($value) > 500) {
+        $errors['subjects'] = 'Selected subjects must not exceed 500 characters in total.';
+    }
+
+    return [
+        'value' => $value,
+        'subjects' => $subjects,
+        'allowed' => $allowedSubjects,
+        'errors' => $errors,
+    ];
+}
+
 /** Ensure the non-destructive archive registry is available. */
 function ensureArchiveSchema(PDO $db): void {
     static $ready = false;
@@ -312,6 +487,28 @@ function validateTeacherInputFields(array $data): array {
             $errors[$field] = 'Enter a valid date that is not in the future.';
         }
     }
+    return $errors;
+}
+
+/**
+ * Validate an edited teacher without trapping imported legacy records.
+ *
+ * Existing values that predate the current validation rules may be retained
+ * while another field is updated. Once a field is changed, the current rules
+ * apply to the submitted value.
+ */
+function validateTeacherUpdateInputFields(array $data, array $existing): array {
+    $errors = validateTeacherInputFields($data);
+    foreach (array_keys($errors) as $field) {
+        if (!array_key_exists($field, $existing)) continue;
+
+        $submittedValue = trim((string)($data[$field] ?? ''));
+        $existingValue = trim((string)($existing[$field] ?? ''));
+        if ($submittedValue === $existingValue) {
+            unset($errors[$field]);
+        }
+    }
+
     return $errors;
 }
 
@@ -627,6 +824,7 @@ function syncTeacherClcAssignments(
     int $primaryClcId = 0
 ): void {
     requireDatabaseStructure($db, [
+        'teachers' => ['education_program'],
         'teacher_clc_assignments' => ['teacher_id', 'clc_school_id', 'school_year', 'is_primary', 'assignment_status', 'updated_at'],
         'als_teacher_assignments' => ['teacher_id', 'start_school_year', 'end_school_year', 'effective_start_date', 'effective_end_date', 'assignment_status', 'created_by'],
         'als_teacher_assignment_clcs' => ['assignment_id', 'clc_school_id', 'is_primary'],
@@ -637,6 +835,15 @@ function syncTeacherClcAssignments(
 
     $clcIds = normalizePositiveIdList($clcIds);
     sort($clcIds, SORT_NUMERIC);
+    $programStmt = $db->prepare('SELECT education_program FROM teachers WHERE id = ? LIMIT 1');
+    $programStmt->execute([$teacherId]);
+    $teacherProgram = (string)$programStmt->fetchColumn();
+    if ($teacherProgram === '') {
+        throw new InvalidArgumentException('Teacher not found for the CLC assignment.');
+    }
+    if ($clcIds && $teacherProgram !== 'als') {
+        throw new InvalidArgumentException('CLC assignments are available only for ALS teachers.');
+    }
     if ($primaryClcId > 0 && !in_array($primaryClcId, $clcIds, true)) {
         throw new InvalidArgumentException('Primary CLC must be part of the selected assignments.');
     }
@@ -1512,6 +1719,8 @@ function computeSchoolTeacherPlanning(PDO $db, int $schoolId, ?array $settings =
     ensureTeacherPlanningSchema($db);
     ensureArchiveSchema($db);
     requireDatabaseStructure($db, [
+        'teachers' => ['education_program'],
+        'schools' => ['school_head_teacher_id'],
         'teacher_clc_assignments' => ['teacher_id', 'clc_school_id', 'assignment_status'],
         'school_level_statistics' => ['school_id', 'level_code', 'learner_count', 'class_count'],
     ]);
@@ -1537,7 +1746,7 @@ function computeSchoolTeacherPlanning(PDO $db, int $schoolId, ?array $settings =
                          COALESCE(t.students_handled, 0) AS students_handled,
                           t.advisory_class
                    FROM teachers t
-                   WHERE ' . activeArchiveExclusion('teacher', 't.id') . '
+                   WHERE ' . instructionalTeacherPredicate('t', 'formal') . '
                      AND (
                          t.school_id = :school_id
                       OR EXISTS (

@@ -12,7 +12,8 @@ requireRoleSelection();
 $db = getDB();
 ensureArchiveSchema($db);
 requireDatabaseStructure($db, [
-    'schools' => ['offers_als'],
+    'teachers' => ['education_program'],
+    'schools' => ['offers_als', 'school_head_teacher_id'],
     'teacher_clc_assignments' => ['teacher_id', 'clc_school_id', 'assignment_status'],
 ]);
 $user = currentUser();
@@ -50,7 +51,7 @@ if (shouldFilterByDistrict()) {
     )";
 }
 
-$activeTeacherSql = activeArchiveExclusion('teacher', 't.id');
+$activeTeacherSql = instructionalTeacherPredicate('t', 'formal');
 $activeSchoolSql = activeArchiveExclusion('school', 'schools.id');
 $activeDistrictSql = activeArchiveExclusion('district', 'districts.id');
 $totalTeachers  = $db->query("SELECT COUNT(*) FROM teachers t WHERE $activeTeacherSql $districtFilter")->fetchColumn();
@@ -114,7 +115,8 @@ $schoolsWithTeachers = (int)$db->query(
      WHERE EXISTS (
          SELECT 1
          FROM teachers t
-         WHERE t.school_id = s.id
+         WHERE ' . $activeTeacherSql . '
+           AND (t.school_id = s.id
             OR EXISTS (
                 SELECT 1 FROM teacher_clc_assignments tca_coverage
                 WHERE tca_coverage.teacher_id = t.id
@@ -134,7 +136,7 @@ $schoolsWithTeachers = (int)$db->query(
                 AND t.school_name_raw IS NOT NULL
                 AND TRIM(t.school_name_raw) <> ""
                 AND LOWER(TRIM(t.school_name_raw)) = LOWER(TRIM(s.school_name))
-            )
+            ))
      )'
 )->fetchColumn();
 $schoolsWithoutTeachers = max(0, (int)$totalSchools - $schoolsWithTeachers);
@@ -155,7 +157,8 @@ $genderData = $db->query(
             ELSE 'Not Set'
         END AS gender,
         COUNT(*) as cnt
-     FROM teachers
+     FROM teachers t
+     WHERE $activeTeacherSql
      GROUP BY gender
      ORDER BY cnt DESC"
 )->fetchAll();
@@ -174,12 +177,15 @@ $districtData = $db->query(
         FROM teachers t
         LEFT JOIN schools s ON t.school_id = s.id
         LEFT JOIN districts d ON s.district_id = d.id
+        WHERE ' . $activeTeacherSql . '
         UNION ALL
         SELECT tca.teacher_id, d_clc.district_name
         FROM teacher_clc_assignments tca
+        INNER JOIN teachers t ON t.id = tca.teacher_id
         INNER JOIN schools s_clc ON s_clc.id = tca.clc_school_id
         INNER JOIN districts d_clc ON d_clc.id = s_clc.district_id
         WHERE tca.assignment_status = "Active"
+          AND ' . $activeTeacherSql . '
      ) x
      WHERE x.district_name IS NOT NULL AND TRIM(x.district_name) <> ""
      GROUP BY
@@ -199,9 +205,9 @@ unset($districtRow);
 
 // Position breakdown
 $positionData = $db->query(
-    'SELECT position, COUNT(*) as cnt FROM teachers
-     WHERE position IS NOT NULL AND position != ""
-     GROUP BY position ORDER BY cnt DESC LIMIT 8'
+    "SELECT t.position, COUNT(*) as cnt FROM teachers t
+     WHERE $activeTeacherSql AND t.position IS NOT NULL AND t.position != ''
+     GROUP BY position ORDER BY cnt DESC LIMIT 8"
 )->fetchAll();
 
 // School teacher need (top shortages)
@@ -210,7 +216,7 @@ $schoolNeedQuery = $hasLearnersPerTeacher
           s.school_name,
           GREATEST(0, CEIL(COALESCE(s.learner_count, 0) / NULLIF(COALESCE(s.learners_per_teacher, 35), 0)) - COUNT(t.id)) AS teacher_need
       FROM schools s
-      LEFT JOIN teachers t ON (
+      LEFT JOIN teachers t ON ((
           t.school_id = s.id
           OR EXISTS (
               SELECT 1 FROM teacher_clc_assignments tca_need
@@ -232,7 +238,7 @@ $schoolNeedQuery = $hasLearnersPerTeacher
               AND TRIM(t.school_name_raw) <> ''
               AND LOWER(TRIM(t.school_name_raw)) = LOWER(TRIM(s.school_name))
           )
-      )
+      ) AND $activeTeacherSql)
       GROUP BY s.id, s.school_name, s.learner_count, s.learners_per_teacher
       HAVING teacher_need > 0
       ORDER BY teacher_need DESC, s.school_name ASC
@@ -241,7 +247,7 @@ $schoolNeedQuery = $hasLearnersPerTeacher
           s.school_name,
           GREATEST(0, CEIL(COALESCE(s.learner_count, 0) / 35) - COUNT(t.id)) AS teacher_need
       FROM schools s
-      LEFT JOIN teachers t ON (
+      LEFT JOIN teachers t ON ((
           t.school_id = s.id
           OR EXISTS (
               SELECT 1 FROM teacher_clc_assignments tca_need
@@ -263,7 +269,7 @@ $schoolNeedQuery = $hasLearnersPerTeacher
               AND TRIM(t.school_name_raw) <> ''
               AND LOWER(TRIM(t.school_name_raw)) = LOWER(TRIM(s.school_name))
           )
-      )
+      ) AND $activeTeacherSql)
       GROUP BY s.id, s.school_name, s.learner_count
       HAVING teacher_need > 0
       ORDER BY teacher_need DESC, s.school_name ASC
@@ -281,8 +287,9 @@ $ageData = $db->query(
                     WHEN TIMESTAMPDIFF(YEAR, birthdate, CURDATE()) = 60 THEN '60'
         END AS bracket,
         COUNT(*) AS cnt
-         FROM teachers
-         WHERE birthdate IS NOT NULL
+         FROM teachers t
+         WHERE $activeTeacherSql
+             AND birthdate IS NOT NULL
              AND birthdate != '0000-00-00'
              AND TIMESTAMPDIFF(YEAR, birthdate, CURDATE()) <= 60
      GROUP BY bracket
@@ -2021,12 +2028,12 @@ foreach ($compositionHoverRows as $key => $rows) {
     </div>
 </div>
 <div class="stats-grid dashboard-container" id="dashboardContainer">
-    <a href="<?= APP_URL ?>/teachers.php" class="report-stat-link" style="text-decoration:none;color:inherit;">
-        <div class="stat-card glass-card draggable-card" data-card-id="card-teachers" data-card-name="Total Teachers" data-card-color="">
+    <a href="<?= APP_URL ?>/teachers.php?workforce=formal" class="report-stat-link" style="text-decoration:none;color:inherit;">
+        <div class="stat-card glass-card draggable-card" data-card-id="card-teachers" data-card-name="Formal Teachers" data-card-color="">
             <div class="stat-icon icon-blue"><i class="fas fa-chalkboard-teacher"></i></div>
             <div class="stat-body">
                 <div class="stat-value"><?= number_format((int)$totalTeachers) ?></div>
-                <div class="stat-label">Total Teachers</div>
+                <div class="stat-label">Formal Teachers</div>
             </div>
         </div>
     </a>
@@ -2048,7 +2055,7 @@ foreach ($compositionHoverRows as $key => $rows) {
             </div>
         </div>
     </a>
-    <a href="<?= APP_URL ?>/teachers.php?pwd=yes" class="report-stat-link" style="text-decoration:none;color:inherit;">
+    <a href="<?= APP_URL ?>/teachers.php?pwd=yes&amp;workforce=formal" class="report-stat-link" style="text-decoration:none;color:inherit;">
         <div class="stat-card glass-card draggable-card" data-card-id="card-pwd" data-card-name="PWD Personnel" data-card-color="">
             <div class="stat-icon icon-orange"><i class="fas fa-universal-access"></i></div>
             <div class="stat-body">
@@ -2189,9 +2196,9 @@ foreach ($compositionHoverRows as $key => $rows) {
         </div>
     </div>
 
-    <div class="chart-card glass-card draggable-card" data-card-id="card-district" data-card-name="Teachers per District" data-card-color="">
+    <div class="chart-card glass-card draggable-card" data-card-id="card-district" data-card-name="Formal Teachers per District" data-card-color="">
         <div class="card-header">
-            <h3 class="card-title"><i class="fas fa-map-marked-alt"></i> Teachers per District</h3>
+            <h3 class="card-title"><i class="fas fa-map-marked-alt"></i> Formal Teachers per District</h3>
         </div>
         <div class="chart-container">
             <canvas id="districtChart"></canvas>
@@ -2266,7 +2273,7 @@ foreach ($compositionHoverRows as $key => $rows) {
 <?php if (!in_array(strtolower($user['role'] ?? ''), ['psds', 'sdc'], true)): ?>
     <div class="chart-card glass-card draggable-card coverage-card" data-card-id="card-school-coverage" data-card-name="School Coverage" data-card-color="">
         <div class="card-header">
-            <h3 class="card-title"><i class="fas fa-school-circle-check"></i> Schools With Teachers</h3>
+            <h3 class="card-title"><i class="fas fa-school-circle-check"></i> Schools With Formal Teachers</h3>
             <div class="coverage-summary-badge"><i class="fas fa-chart-line"></i> <?= number_format($schoolCoveragePct, 1) ?>% coverage</div>
         </div>
         <div class="coverage-layout">
@@ -2290,9 +2297,9 @@ foreach ($compositionHoverRows as $key => $rows) {
             </div>
             <div class="coverage-stats">
                 <div class="coverage-stat">
-                    <div class="coverage-stat-label">With Teachers</div>
+                    <div class="coverage-stat-label">With Formal Teachers</div>
                     <div class="coverage-stat-value"><?= number_format((int)$schoolsWithTeachers) ?></div>
-                    <div class="coverage-stat-note">Schools with active teacher links.</div>
+                    <div class="coverage-stat-note">Schools with active formal instructional teachers.</div>
                 </div>
                 <div class="coverage-stat">
                     <div class="coverage-stat-label">Still Unstaffed</div>
@@ -2553,13 +2560,13 @@ class DashboardCustomizer {
     renderCardsList() {
         const container = document.getElementById('cardsList');
         const cards = [
-            { id: 'card-teachers', name: 'Total Teachers' },
+            { id: 'card-teachers', name: 'Formal Teachers' },
             { id: 'card-schools', name: 'Schools' },
             { id: 'card-districts', name: 'Districts' },
             { id: 'card-pwd', name: 'PWD Personnel' },
             { id: 'card-retirements', name: 'Retirement Watch (59-60)' },
             { id: 'card-gender', name: 'Gender Distribution' },
-            { id: 'card-district', name: 'Teachers per District' },
+            { id: 'card-district', name: 'Formal Teachers per District' },
             { id: 'card-age', name: 'Age Distribution' },
             { id: 'card-position', name: 'Position Breakdown' },
             { id: 'card-retirement-watch', name: 'Retirement Projection' },
@@ -2777,7 +2784,7 @@ function initCharts() {
         type: 'bar',
         data: {
             labels: <?= $districtLabels ?>,
-            datasets: [{ label: 'Teachers', data: <?= $districtCounts ?>, backgroundColor: 'rgba(99,102,241,.7)', borderRadius: 6, borderWidth: 0 }]
+            datasets: [{ label: 'Formal Teachers', data: <?= $districtCounts ?>, backgroundColor: 'rgba(99,102,241,.7)', borderRadius: 6, borderWidth: 0 }]
         },
         options: {
             responsive: true, maintainAspectRatio: false, indexAxis: 'y',

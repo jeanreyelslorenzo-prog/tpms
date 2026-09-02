@@ -8,6 +8,8 @@ requireRoleSelection();
 $db = getDB();
 ensureArchiveSchema($db);
 requireDatabaseStructure($db, [
+    'teachers' => ['education_program'],
+    'schools' => ['school_head_teacher_id'],
     'teacher_clc_assignments' => ['teacher_id', 'clc_school_id', 'school_year', 'is_primary', 'assignment_status'],
 ]);
 
@@ -21,6 +23,7 @@ $filterGrade  = trim($_GET['grade'] ?? '');
 $filterPwd    = strtolower(trim((string)($_GET['pwd'] ?? '')));
 $filterRetire = strtolower(trim((string)($_GET['retire'] ?? '')));
 $filterData   = strtolower(trim((string)($_GET['data'] ?? '')));
+$workforce    = strtolower(trim((string)($_GET['workforce'] ?? '')));
 $filterSchoolRaw = trim((string)($_GET['school'] ?? ''));
 $filterSchool = 0;
 
@@ -43,6 +46,10 @@ if (!in_array($filterPwd, $allowedPwdFilters, true)) {
 $allowedDataFilters = ['', 'needs_update', 'birthdate_fix'];
 if (!in_array($filterData, $allowedDataFilters, true)) {
     $filterData = '';
+}
+
+if (!in_array($workforce, ['', 'formal', 'als'], true)) {
+    $workforce = '';
 }
 
 $missingDataSqlClause = "(
@@ -116,6 +123,9 @@ $schoolCtxQuery = $filterSchool > 0 ? '&school=' . urlencode(encryptId($filterSc
 
 $where  = [activeArchiveExclusion('teacher', 't.id')];
 $params = [];
+if ($workforce !== '') {
+    $where[] = instructionalTeacherPredicate('t', $workforce);
+}
 
 // Add district filter for non-admin users
 if (shouldFilterByDistrict()) {
@@ -294,7 +304,7 @@ if ($filterSchool > 0) {
     }
 }
 
-$buildTeachersUrl = static function(array $overrides = []) use ($search, $filterDist, $filterPos, $filterSpec, $filterGender, $filterGrade, $filterPwd, $filterRetire, $filterSchool, $filterData): string {
+$buildTeachersUrl = static function(array $overrides = []) use ($search, $filterDist, $filterPos, $filterSpec, $filterGender, $filterGrade, $filterPwd, $filterRetire, $filterSchool, $filterData, $workforce): string {
     $query = [];
     if ($search !== '') {
         $query['q'] = $search;
@@ -325,6 +335,9 @@ $buildTeachersUrl = static function(array $overrides = []) use ($search, $filter
     }
     if ($filterData !== '') {
         $query['data'] = $filterData;
+    }
+    if ($workforce !== '') {
+        $query['workforce'] = $workforce;
     }
 
     foreach ($overrides as $k => $v) {
@@ -391,18 +404,23 @@ foreach ($gradeLevelRaw as $levelString) {
 
 // Sort by count descending
 arsort($gradeLevelStats);
+$teacherResultLabel = match ($workforce) {
+    'formal' => 'formal teachers',
+    'als' => 'ALS teachers',
+    default => 'teacher and school-head records',
+};
 
 ?>
 
 <!-- ── Filters Bar ─────────────────────────────────────────── -->
 <div class="filter-bar glass-card teachers-actionbar">
     <div class="teachers-top-row">
-        <form method="GET" action="" id="filterForm" class="filter-form teachers-filter-form">
+        <form method="GET" action="" id="filterForm" class="filter-form teachers-filter-form" data-live-search-form>
             <div class="filter-group teachers-filter-item teachers-search-wrap">
                 <div class="search-box">
                     <i class="fas fa-search search-icon"></i>
                     <input type="text" name="q" class="form-input" placeholder="Search name, employee no., specialization..."
-                           value="<?= clean($search) ?>" id="searchInput">
+                           value="<?= clean($search) ?>" id="searchInput" data-live-search-input autocomplete="off">
                 </div>
             </div>
             <div class="teachers-filter-row">
@@ -436,11 +454,11 @@ arsort($gradeLevelStats);
                 </div>
                 <div class="filter-group teachers-filter-item">
                     <input type="text" name="pos" class="form-input" placeholder="Position..."
-                           value="<?= clean($filterPos) ?>" onchange="this.form.submit()">
+                           value="<?= clean($filterPos) ?>" data-live-search-input autocomplete="off">
                 </div>
                 <div class="filter-group teachers-filter-item">
                     <input type="text" name="grade" class="form-input" placeholder="Grade level..."
-                           value="<?= clean($filterGrade) ?>" onchange="this.form.submit()">
+                           value="<?= clean($filterGrade) ?>" data-live-search-input autocomplete="off">
                 </div>
             </div>
         </form>
@@ -450,15 +468,16 @@ arsort($gradeLevelStats);
             <?php if (canExportTeacherData()): ?>
             <form id="exportTeachersForm" method="GET" action="<?= APP_URL ?>/actions/export.php" style="display:inline;">
                 <input type="hidden" name="format" id="exportFormat" value="csv">
-                <input type="hidden" name="q" value="<?= htmlspecialchars($search, ENT_QUOTES, 'UTF-8') ?>">
+                <input type="hidden" name="q" value="<?= htmlspecialchars($search, ENT_QUOTES, 'UTF-8') ?>" data-live-search-sync="teachers-export-q">
                 <input type="hidden" name="dist" value="<?= htmlspecialchars($filterDist, ENT_QUOTES, 'UTF-8') ?>">
-                <input type="hidden" name="pos" value="<?= htmlspecialchars($filterPos, ENT_QUOTES, 'UTF-8') ?>">
+                <input type="hidden" name="pos" value="<?= htmlspecialchars($filterPos, ENT_QUOTES, 'UTF-8') ?>" data-live-search-sync="teachers-export-position">
                 <input type="hidden" name="spec" value="<?= htmlspecialchars($filterSpec, ENT_QUOTES, 'UTF-8') ?>">
                 <input type="hidden" name="gen" value="<?= htmlspecialchars($filterGender, ENT_QUOTES, 'UTF-8') ?>">
-                <input type="hidden" name="grade" value="<?= htmlspecialchars($filterGrade, ENT_QUOTES, 'UTF-8') ?>">
+                <input type="hidden" name="grade" value="<?= htmlspecialchars($filterGrade, ENT_QUOTES, 'UTF-8') ?>" data-live-search-sync="teachers-export-grade">
                 <input type="hidden" name="pwd" value="<?= htmlspecialchars($filterPwd, ENT_QUOTES, 'UTF-8') ?>">
                 <input type="hidden" name="retire" value="<?= htmlspecialchars($filterRetire, ENT_QUOTES, 'UTF-8') ?>">
                 <input type="hidden" name="data" value="<?= htmlspecialchars($filterData, ENT_QUOTES, 'UTF-8') ?>">
+                <input type="hidden" name="workforce" value="<?= htmlspecialchars($workforce, ENT_QUOTES, 'UTF-8') ?>">
                 <input type="hidden" name="school" value="<?= $filterSchool > 0 ? htmlspecialchars(urlencode(encryptId($filterSchool)), ENT_QUOTES, 'UTF-8') : '' ?>">
                 <select class="form-select" style="max-width:140px;" onchange="if(this.value){document.getElementById('exportFormat').value = this.value; document.getElementById('exportTeachersForm').submit();}">
                     <option value="">📥 Export...</option>
@@ -492,6 +511,17 @@ arsort($gradeLevelStats);
     </div>
 
     <div class="filter-actions teachers-data-filters">
+        <a href="<?= $buildTeachersUrl(['workforce' => 'formal', 'page' => null]) ?>" class="btn btn-sm <?= $workforce === 'formal' ? 'btn-primary' : 'btn-ghost' ?>">
+            <i class="fas fa-school"></i> Formal Teachers
+        </a>
+        <a href="<?= $buildTeachersUrl(['workforce' => 'als', 'page' => null]) ?>" class="btn btn-sm <?= $workforce === 'als' ? 'btn-primary' : 'btn-ghost' ?>">
+            <i class="fas fa-book-open-reader"></i> ALS Teachers
+        </a>
+        <?php if ($workforce !== ''): ?>
+        <a href="<?= $buildTeachersUrl(['workforce' => null, 'page' => null]) ?>" class="btn btn-ghost btn-sm">
+            <i class="fas fa-address-book"></i> All Records
+        </a>
+        <?php endif; ?>
         <a href="<?= $buildTeachersUrl(['data' => 'needs_update', 'page' => null]) ?>" class="btn btn-sm <?= $filterData === 'needs_update' ? 'btn-primary' : 'btn-ghost' ?>">
             <i class="fas fa-triangle-exclamation"></i> Needs Update
         </a>
@@ -503,7 +533,7 @@ arsort($gradeLevelStats);
             <i class="fas fa-xmark"></i> Clear Data Filter
         </a>
         <?php endif; ?>
-        <?php if ($search || $filterDist || $filterPos || $filterGender || $filterSchool || $filterSpec || $filterGrade || $filterPwd || $filterRetire || $filterData): ?>
+        <?php if ($search || $filterDist || $filterPos || $filterGender || $filterSchool || $filterSpec || $filterGrade || $filterPwd || $filterRetire || $filterData || $workforce): ?>
         <a href="<?= APP_URL ?>/teachers.php" class="btn btn-ghost btn-sm teachers-clear-btn">
             <i class="fas fa-times"></i> Clear Filters
         </a>
@@ -594,25 +624,26 @@ arsort($gradeLevelStats);
 
 
 
+<div data-live-search-results="teachers">
 <!-- ── Results Count ──────────────────────────────────────── -->
 <div class="results-info">
     Showing <strong><?= number_format($pag['offset'] + 1) ?>–<?= number_format(min($pag['offset'] + $pag['per_page'], $total)) ?></strong>
-    of <strong><?= number_format($total) ?></strong> teachers
+    of <strong><?= number_format($total) ?></strong> <?= clean($teacherResultLabel) ?>
 </div>
 
 <!-- ── Teachers List View ─────────────────────────────────── -->
 <div class="table-card glass-card" id="teachersListView" style="display:none">
     <div class="table-scroll">
-        <table class="data-table">
+        <table class="data-table teachers-table">
             <thead>
                 <tr>
-                    <th>Name</th>
-                    <th>Employee No.</th>
-                    <th>Position</th>
-                    <th>School</th>
-                    <th>District</th>
-                    <th>Gender</th>
-                    <?php if (canEdit()): ?><th class="text-center">Actions</th><?php endif; ?>
+                    <th class="col-teacher-name">Name</th>
+                    <th class="col-employee-number">Employee No.</th>
+                    <th class="col-position">Position</th>
+                    <th class="col-school">School</th>
+                    <th class="col-district">District</th>
+                    <th class="col-gender">Gender</th>
+                    <?php if (canEdit()): ?><th class="text-center col-actions">Actions</th><?php endif; ?>
                 </tr>
             </thead>
             <tbody>
@@ -626,7 +657,7 @@ arsort($gradeLevelStats);
                     ]);
                     $fullAddress = $addrParts ? implode(', ', $addrParts) : '—';
                 ?>
-                <td>
+                <td class="col-teacher-name">
                     <strong><?= clean($t['last_name']) ?>, <?= clean($t['first_name']) ?></strong>
                     <?php if (!empty($t['middle_name']) || !empty($t['extension_name'])): ?>
                     <div style="font-size:12px;color:var(--text-muted)"><?= clean(($t['middle_name'] ?? '') . ' ' . ($t['extension_name'] ?? '')) ?></div>
@@ -642,18 +673,22 @@ arsort($gradeLevelStats);
                     <?php endif; ?>
                     <div style="font-size:12px;color:var(--text-muted)"><i class="fas fa-map-marker-alt"></i> <?= clean($fullAddress) ?></div>
                 </td>
-                <td><?= clean($t['employee_number'] ?? '—') ?></td>
-                <td><?= clean($t['position'] ?? '—') ?></td>
-                <td>
+                <td class="col-employee-number"><?= clean($t['employee_number'] ?? '—') ?></td>
+                <td class="col-position">
+                    <div><?= clean($t['position'] ?? '—') ?></div>
+                    <div style="font-size:12px;color:var(--text-muted);margin-top:.25rem"><?= clean(teacherEducationProgramLabel($t['education_program'] ?? 'formal')) ?></div>
+                </td>
+                <td class="col-school">
                     <div><?= clean($t['school_name'] ?? '—') ?></div>
-                    <?php if (!empty($t['active_clc_assignments'])): ?>
+                    <?php if (($t['education_program'] ?? 'formal') === 'als' && !empty($t['active_clc_assignments'])): ?>
                     <div style="font-size:12px;color:var(--text-muted);margin-top:.3rem"><i class="fas fa-route"></i> <?= clean($t['active_clc_assignments']) ?></div>
                     <?php endif; ?>
                 </td>
-                <td><?= clean($t['district'] ?? '—') ?></td>
-                <td><?= clean($t['gender'] ?? '—') ?></td>
+                <td class="col-district"><?= clean($t['district'] ?? '—') ?></td>
+                <td class="col-gender"><?= clean($t['gender'] ?? '—') ?></td>
                 <?php if (canEdit()): ?>
-                <td class="text-center">
+                <td class="text-center col-actions">
+                    <div class="teacher-row-actions">
                     <a href="<?= APP_URL ?>/view_teacher.php?id=<?= encryptId((int)$t['id']) ?><?= $schoolCtxQuery ?>" class="btn btn-sm btn-ghost" title="View">
                         <i class="fas fa-eye"></i>
                     </a>
@@ -668,6 +703,7 @@ arsort($gradeLevelStats);
                             onclick="confirmDelete(<?= (int)$t['id'] ?>, '<?= clean($t['last_name'].', '.$t['first_name']) ?>')">
                         <i class="fas fa-trash"></i>
                     </button>
+                    </div>
                 </td>
                 <?php endif; ?>
             </tr>
@@ -790,6 +826,7 @@ arsort($gradeLevelStats);
         <div class="tc-name"><?= clean($t['last_name']) ?>, <?= clean($t['first_name']) ?> <?= clean($t['middle_name'] ?? '') ?><?= $t['extension_name'] ? ' '.$t['extension_name'] : '' ?></div>
         <div class="tc-sub">
             <span class="tc-badge"><?= clean($t['position'] ?? '—') ?></span>
+            <span class="tc-badge"><?= clean(($t['education_program'] ?? 'formal') === 'als' ? 'ALS' : 'Formal Education') ?></span>
             <?php if (!empty($t['gender'])): ?>
             <span class="tc-badge"><?= clean($t['gender']) ?></span>
             <?php endif; ?>
@@ -801,7 +838,7 @@ arsort($gradeLevelStats);
             <?php if ($districtName !== ''): ?>
             <span class="tc-info-row" title="District"><i class="fas fa-map"></i><span class="tc-key">District</span><span class="tc-value"><?= clean($districtName) ?></span></span>
             <?php endif; ?>
-            <?php if (!empty($t['active_clc_assignments'])): ?>
+            <?php if (($t['education_program'] ?? 'formal') === 'als' && !empty($t['active_clc_assignments'])): ?>
             <span class="tc-info-row" title="Active ALS CLC assignments"><i class="fas fa-route"></i><span class="tc-key">ALS CLCs</span><span class="tc-value"><?= clean($t['active_clc_assignments']) ?></span></span>
             <?php endif; ?>
             <span class="tc-info-row" title="Appointment Date"><i class="fas fa-calendar-check"></i><span class="tc-key">Appointment Date</span><span class="tc-value"><?= clean($appointmentDateLabel) ?></span></span>
@@ -863,6 +900,7 @@ arsort($gradeLevelStats);
 
 <!-- ── Pagination ─────────────────────────────────────────── -->
 <?= paginationLinks($pag, APP_URL . '/' . basename($_SERVER['PHP_SELF']) . ($_SERVER['QUERY_STRING'] ? '?' . $_SERVER['QUERY_STRING'] : '')) ?>
+</div>
 
 <?php if (isAdmin()): ?>
 <!-- Bulk Upload Teachers Modal -->
@@ -1124,30 +1162,12 @@ function setTeachersView(mode) {
     localStorage.setItem('teachersViewMode', mode);
 }
 
-function createDebounce(fn, delay) {
-    if (typeof window.debounce === 'function') {
-        return window.debounce(fn, delay);
-    }
-    let timer;
-    return function(...args) {
-        clearTimeout(timer);
-        timer = setTimeout(() => fn.apply(this, args), delay);
-    };
-}
-
 document.addEventListener('DOMContentLoaded', function() {
     const listBtnEl = document.getElementById('teachersViewListBtn');
     const cardBtnEl = document.getElementById('teachersViewCardBtn');
     if (listBtnEl) listBtnEl.addEventListener('click', () => setTeachersView('list'));
     if (cardBtnEl) cardBtnEl.addEventListener('click', () => setTeachersView('card'));
     setTeachersView(localStorage.getItem('teachersViewMode') || 'card');
-
-    const searchInputEl = document.getElementById('searchInput');
-    if (searchInputEl) {
-        searchInputEl.addEventListener('input', createDebounce(function() {
-            this.form.submit();
-        }, 600));
-    }
 
     const bulkUploadFormEl = document.getElementById('bulkUploadTeachersForm');
     if (bulkUploadFormEl) {

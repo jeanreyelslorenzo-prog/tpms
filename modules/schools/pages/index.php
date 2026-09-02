@@ -7,7 +7,7 @@ requireRoleSelection();
 
 $db     = getDB();
 ensureArchiveSchema($db);
-$activeTeacherPredicate = activeArchiveExclusion('teacher', 't.id');
+$activeTeacherPredicate = instructionalTeacherPredicate('t', 'formal');
 ensureTeacherPlanningSchema($db);
 requireDatabaseStructure($db, [
     'municipalities' => ['id', 'municipality_name', 'province_name'],
@@ -179,12 +179,13 @@ if ($type === 'untagged') {
 if ($staffing === 'no_teacher') {
     $conditions[] = "NOT EXISTS (
         SELECT 1 FROM teachers t0
-        WHERE t0.school_id = s.id OR EXISTS (
+        WHERE " . instructionalTeacherPredicate('t0', 'formal') . "
+          AND (t0.school_id = s.id OR EXISTS (
             SELECT 1 FROM teacher_clc_assignments tca0
             WHERE tca0.teacher_id = t0.id
               AND tca0.clc_school_id = s.id
               AND tca0.assignment_status = 'Active'
-        )
+        ))
     )";
 }
 if ($districtFilter !== '') {
@@ -340,12 +341,12 @@ $headerSchoolTypeCards = [
 $noTeacherParams = [];
 $noTeacherWhere = "WHERE " . activeArchiveExclusion('school', 's.id') . " AND NOT EXISTS (
     SELECT 1 FROM teachers t
-    WHERE t.school_id = s.id OR EXISTS (
+    WHERE $activeTeacherPredicate AND (t.school_id = s.id OR EXISTS (
         SELECT 1 FROM teacher_clc_assignments tca
         WHERE tca.teacher_id = t.id
           AND tca.clc_school_id = s.id
           AND tca.assignment_status = 'Active'
-    )
+    ))
 )";
 if ($summaryDistrictId !== null) {
     $noTeacherWhere .= ' AND s.district_id = ?';
@@ -369,7 +370,7 @@ if ($statsDistrictParams) {
         'SELECT
             COUNT(*) AS total_schools,
             COALESCE(SUM(learner_count), 0) AS total_learners,
-            (SELECT COUNT(*) FROM teachers t WHERE ' . activeArchiveExclusion('teacher', 't.id') . ' AND (
+            (SELECT COUNT(*) FROM teachers t WHERE ' . $activeTeacherPredicate . ' AND (
                 EXISTS (SELECT 1 FROM schools st_primary WHERE st_primary.id = t.school_id AND st_primary.district_id = ?)
                 OR EXISTS (
                     SELECT 1 FROM teacher_clc_assignments tca_stats
@@ -392,7 +393,7 @@ if ($statsDistrictParams) {
         'SELECT
             COUNT(*) AS total_schools,
             COALESCE(SUM(learner_count), 0) AS total_learners,
-            (SELECT COUNT(*) FROM teachers t WHERE ' . activeArchiveExclusion('teacher', 't.id') . ') AS total_teachers,
+            (SELECT COUNT(*) FROM teachers t WHERE ' . $activeTeacherPredicate . ') AS total_teachers,
             COALESCE(SUM(CASE WHEN REPLACE(LOWER(TRIM(COALESCE(school_type, ""))), " ", "") IN ("elementary", "es", "es/jhs", "es/shs", "es/jhs/shs", "alloffering") THEN 1 ELSE 0 END), 0) AS elementary_count,
             COALESCE(SUM(CASE WHEN REPLACE(LOWER(TRIM(COALESCE(school_type, ""))), " ", "") IN ("jhs", "jhs/shs", "jhs-shs", "juniorandseniorhighschool", "es/jhs", "es/jhs/shs", "alloffering") THEN 1 ELSE 0 END), 0) AS jhs_count,
             COALESCE(SUM(CASE WHEN REPLACE(LOWER(TRIM(COALESCE(school_type, ""))), " ", "") IN ("shs", "jhs/shs", "jhs-shs", "juniorandseniorhighschool", "es/shs", "es/jhs/shs", "alloffering") THEN 1 ELSE 0 END), 0) AS shs_count,
@@ -700,7 +701,7 @@ $schoolExportSuffix = $schoolExportQuery !== '' ? ('&' . $schoolExportQuery) : '
     #schoolsListView { overflow: hidden; }
     #schoolsListView .table-scroll { scrollbar-gutter: stable; }
     #schoolsListView .schools-table {
-        min-width: 1430px;
+        min-width: 1500px;
         table-layout: fixed;
         font-size: .875rem;
         line-height: 1.45;
@@ -727,7 +728,8 @@ $schoolExportSuffix = $schoolExportQuery !== '' ? ('&' . $schoolExportQuery) : '
     #schoolsListView .col-type { width: 155px; }
     #schoolsListView .col-district { width: 140px; }
     #schoolsListView .col-school-head { width: 225px; }
-    #schoolsListView .col-count { width: 85px; }
+    #schoolsListView .col-formal-teachers { width: 145px; }
+    #schoolsListView .col-learners { width: 95px; }
     #schoolsListView .col-need { width: 110px; }
     #schoolsListView .col-actions { width: 165px; }
     #schoolsListView .school-name-link {
@@ -902,7 +904,7 @@ $schoolExportSuffix = $schoolExportQuery !== '' ? ('&' . $schoolExportQuery) : '
 
 </div>
 <div class="filter-bar glass-card">
-    <form method="GET" class="filter-form" id="schoolsFilterForm">
+    <form method="GET" class="filter-form" id="schoolsFilterForm" data-live-search-form>
         <?php if ($staffing !== 'all'): ?>
         <input type="hidden" name="staffing" value="<?= clean($staffing) ?>">
         <?php endif; ?>
@@ -925,7 +927,7 @@ $schoolExportSuffix = $schoolExportQuery !== '' ? ('&' . $schoolExportQuery) : '
         </select>
         <div class="search-box">
             <i class="fas fa-search search-icon"></i>
-            <input type="text" name="q" id="schoolsSearchInput" class="form-input" placeholder="Search schools…" value="<?= clean($search) ?>" width="100%" autocomplete="off">
+            <input type="text" name="q" id="schoolsSearchInput" class="form-input" placeholder="Search schools…" value="<?= clean($search) ?>" width="100%" autocomplete="off" data-live-search-input>
         </div>
         <?php if ($search): ?>
         <a href="<?= $buildSchoolsUrl(['q' => null, 'page' => null]) ?>" class="btn btn-ghost btn-sm" title="Clear search"><i class="fas fa-times"></i></a>
@@ -935,34 +937,20 @@ $schoolExportSuffix = $schoolExportQuery !== '' ? ('&' . $schoolExportQuery) : '
     (function () {
         var form   = document.getElementById('schoolsFilterForm');
         var select = document.getElementById('schoolsTypeFilter');
-        var input  = document.getElementById('schoolsSearchInput');
-        var timer;
 
         // Dropdown: submit immediately on change
         select.addEventListener('change', function () {
             form.submit();
-        });
-
-        // Search box: submit after 1000 ms of no typing; also allow Enter
-        input.addEventListener('input', function () {
-            clearTimeout(timer);
-            timer = setTimeout(function () { form.submit(); }, 1000);
-        });
-        input.addEventListener('keydown', function (e) {
-            if (e.key === 'Enter') {
-                clearTimeout(timer);
-                form.submit();
-            }
         });
     })();
     </script>
     <?php if (canExportOperationalData() || canEdit()): ?>
     <div class="filter-actions">
         <?php if (canExportOperationalData()): ?>
-        <a href="<?= APP_URL ?>/actions/export_schools.php?format=csv<?= clean($schoolExportSuffix) ?>" class="btn btn-ghost">
+        <a href="<?= APP_URL ?>/actions/export_schools.php?format=csv<?= clean($schoolExportSuffix) ?>" class="btn btn-ghost" data-live-search-sync="schools-export-csv">
             <i class="fas fa-file-csv"></i> Export CSV
         </a>
-        <a href="<?= APP_URL ?>/actions/export_schools.php?format=excel<?= clean($schoolExportSuffix) ?>" class="btn btn-ghost">
+        <a href="<?= APP_URL ?>/actions/export_schools.php?format=excel<?= clean($schoolExportSuffix) ?>" class="btn btn-ghost" data-live-search-sync="schools-export-excel">
             <i class="fas fa-file-excel"></i> Export Excel
         </a>
         <?php endif; ?>
@@ -1027,6 +1015,7 @@ $schoolExportSuffix = $schoolExportQuery !== '' ? ('&' . $schoolExportQuery) : '
 </div>
 <?php endif; ?>
 
+<div data-live-search-results="schools">
 <div class="table-card glass-card" id="schoolsListView">
     <div class="table-scroll">
         <table class="data-table schools-table">
@@ -1043,8 +1032,8 @@ $schoolExportSuffix = $schoolExportQuery !== '' ? ('&' . $schoolExportQuery) : '
                     <th class="col-type">Type</th>
                     <th class="col-district">District</th>
                     <th class="col-school-head">School Head</th>
-                    <th class="text-center col-count">Teachers</th>
-                    <th class="text-center col-count">Learners</th>
+                    <th class="text-center col-formal-teachers">Formal Teachers</th>
+                    <th class="text-center col-learners">Learners</th>
                     <th class="text-center col-need">Teacher Need</th>
                     <th class="text-center col-actions">Actions</th>
                 </tr>
@@ -1093,12 +1082,12 @@ $schoolExportSuffix = $schoolExportQuery !== '' ? ('&' . $schoolExportQuery) : '
                         <span><?= clean($schoolHeadName !== '' ? $schoolHeadName : 'No School Head') ?></span>
                     </span>
                 </td>
-                <td class="text-center col-count">
-                    <a href="<?= APP_URL ?>/teachers.php?school=<?= urlencode(encryptId((int)$s['id'])) ?>" class="badge badge-blue">
+                <td class="text-center col-formal-teachers">
+                    <a href="<?= APP_URL ?>/teachers.php?school=<?= urlencode(encryptId((int)$s['id'])) ?>&amp;workforce=formal" class="badge badge-blue">
                         <?= number_format((int)$s['teacher_count']) ?>
                     </a>
                 </td>
-                <td class="text-center col-count"><?= number_format((int)$s['learner_count']) ?></td>
+                <td class="text-center col-learners"><?= number_format((int)$s['learner_count']) ?></td>
                 <td class="text-center col-need">
                     <span class="badge <?= $teacherGap > 0 ? 'badge-danger' : 'badge-green' ?>" title="Based on <?= $basis ?> learners per teacher">
                          <?= number_format($teacherGap) ?>
@@ -1158,7 +1147,7 @@ $schoolExportSuffix = $schoolExportQuery !== '' ? ('&' . $schoolExportQuery) : '
     <div class="school-card glass-card">
         <div class="school-card-head">
             <h4><a href="<?= APP_URL ?>/view_school.php?id=<?= urlencode(encryptId((int)$s['id'])) ?>" style="color:inherit;text-decoration:none"><?= clean($s['school_name']) ?></a></h4>
-            <span class="badge badge-blue"><?= number_format((int)$s['teacher_count']) ?> Teachers</span>
+            <span class="badge badge-blue"><?= number_format((int)$s['teacher_count']) ?> Formal Teachers</span>
             <span class="badge badge-green"><?= number_format((int)$s['learner_count']) ?> Learners</span>
             <?php if ($teacherGap > 0): ?>
             <span class="badge badge-danger" title="Based on <?= $basis ?> learners per teacher">Need <?= number_format($teacherGap) ?> Teachers</span>
@@ -1226,6 +1215,7 @@ $schoolExportSuffix = $schoolExportQuery !== '' ? ('&' . $schoolExportQuery) : '
     <?php endif; ?>
 </div>
 <?= paginationLinks($pag, APP_URL . '/' . basename($_SERVER['PHP_SELF']) . ($_SERVER['QUERY_STRING'] ? '?' . $_SERVER['QUERY_STRING'] : '')) ?>
+</div>
 
 <?php if (isAdmin()): ?>
 <!-- Bulk Upload Schools Modal -->

@@ -7,8 +7,10 @@ requireRoleSelection();
 
 $db     = getDB();
 ensureArchiveSchema($db);
-$activeTeacherPredicate = activeArchiveExclusion('teacher', 't.id');
+$activeTeacherPredicate = instructionalTeacherPredicate('t', 'als');
+$primaryAlsTeacherPredicate = instructionalTeacherPredicate('t_primary', 'als');
 requireDatabaseStructure($db, [
+    'teachers' => ['education_program'],
     'municipalities' => ['id', 'municipality_name'],
     'districts' => ['id', 'district_name', 'municipality_id'],
     'schools' => ['municipality_id', 'sector', 'offers_als'],
@@ -127,6 +129,7 @@ $stmt = $db->prepare(
              FROM teacher_clc_assignments tca_primary
              INNER JOIN teachers t_primary ON t_primary.id = tca_primary.teacher_id
              WHERE tca_primary.clc_school_id = s.id
+               AND $primaryAlsTeacherPredicate
                AND tca_primary.assignment_status = 'Active'
                AND tca_primary.is_primary = 1) AS primary_teachers
      FROM schools s
@@ -138,13 +141,13 @@ $centers = $stmt->fetchAll();
 ?>
 
 <div class="filter-bar glass-card">
-    <form method="GET" class="filter-form">
+    <form method="GET" class="filter-form" data-live-search-form>
         <?php if ($subtype !== 'all'): ?>
         <input type="hidden" name="subtype" value="<?= clean($subtype) ?>">
         <?php endif; ?>
         <div class="search-box">
             <i class="fas fa-search search-icon"></i>
-            <input type="text" name="q" class="form-input" placeholder="Search ALS centers…" value="<?= clean($search) ?>">
+            <input type="text" name="q" class="form-input" placeholder="Search ALS centers…" value="<?= clean($search) ?>" data-live-search-input autocomplete="off">
         </div>
         <button type="submit" class="btn btn-ghost btn-sm"><i class="fas fa-search"></i></button>
         <?php if ($search): ?>
@@ -219,6 +222,7 @@ $centers = $stmt->fetchAll();
     </div>
 </div>
 
+<div data-live-search-results="als-centers">
 <div class="results-info">
     <?= number_format($total) ?> ALS center<?= $total !== 1 ? 's' : '' ?> found
 </div>
@@ -251,7 +255,7 @@ $centers = $stmt->fetchAll();
                 <td><?= clean($c['municipality'] ?? '—') ?></td>
                 <td><?= clean($c['district'] ?? '—') ?></td>
                 <td class="text-center">
-                    <a href="<?= APP_URL ?>/teachers.php?school=<?= urlencode(encryptId((int)$c['id'])) ?>" class="badge badge-blue">
+                    <a href="<?= APP_URL ?>/teachers.php?school=<?= urlencode(encryptId((int)$c['id'])) ?>&amp;workforce=als" class="badge badge-blue">
                         <?= number_format((int)$c['teacher_count']) ?>
                     </a>
                     <?php if (!empty($c['primary_teachers'])): ?>
@@ -307,7 +311,7 @@ $centers = $stmt->fetchAll();
             <a href="<?= APP_URL ?>/view_school.php?id=<?= urlencode(encryptId((int)$c['id'])) ?>" class="btn btn-sm btn-secondary">
                 <i class="fas fa-eye"></i> View School
             </a>
-            <a href="<?= APP_URL ?>/teachers.php?school=<?= urlencode(encryptId((int)$c['id'])) ?>" class="btn btn-sm btn-ghost">
+            <a href="<?= APP_URL ?>/teachers.php?school=<?= urlencode(encryptId((int)$c['id'])) ?>&amp;workforce=als" class="btn btn-sm btn-ghost">
                 <i class="fas fa-users"></i> View Teachers
             </a>
             <?php if (canEdit()): ?>
@@ -335,6 +339,7 @@ $centers = $stmt->fetchAll();
 </div>
 
 <?= paginationLinks($pag, APP_URL . '/' . basename($_SERVER['PHP_SELF']) . ($_SERVER['QUERY_STRING'] ? '?' . $_SERVER['QUERY_STRING'] : '')) ?>
+</div>
 
 <?php if (isAdmin()): ?>
 <!-- Bulk Upload ALS Modal -->
